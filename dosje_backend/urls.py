@@ -71,4 +71,18 @@ urlpatterns = [
     path('api/beneficiary/me/', BeneficiaryMeView.as_view(), name='beneficiary_me'),
     path('api/beneficiary/complaints/', BeneficiaryComplaintView.as_view(), name='beneficiary_complaint'),
     path('api/', include(router.urls)),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]
+
+from django.urls import re_path
+from django.views.static import serve
+from django.conf import settings
+
+if not settings.DEBUG:
+    urlpatterns += [
+        re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
+        re_path(r'^static/(?P<path>.*)$', serve, {'document_root': settings.STATIC_ROOT}),
+    ]
+else:
+    from django.conf.urls.static import static
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
