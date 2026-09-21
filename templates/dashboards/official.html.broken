@@ -1,0 +1,1126 @@
+{% extends "base.html" %}
+
+{% block head %}
+<!-- Jitsi Meet API -->
+<script src="https://jitsi.riot.im/external_api.js"></script>
+<!-- Leaflet.js for Maps -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<script>
+    // Enforce role
+    Auth.requireRole('official');
+</script>
+
+<div class="flex h-screen bg-gray-100 overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
+        <div class="p-6 border-b border-slate-700">
+            <h1 class="text-2xl font-bold tracking-tight text-white">DoSJE</h1>
+            <p class="text-slate-400 text-sm mt-1">Official Dashboard</p>
+        </div>
+        
+        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+            <a href="#" onclick="showSection('dashboard')" class="nav-link block px-4 py-3 rounded bg-blue-600 text-white font-medium transition">📊 Dashboard Overview</a>
+            <a href="#" onclick="showSection('scheduling')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">🗓️ Schedule Inspection</a>
+            <a href="#" onclick="showSection('reports')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">📁 Reports Inbox</a>
+            <a href="#" onclick="showSection('duplicates')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">🔍 Potential Duplicates</a>
+            <a href="#" onclick="showSection('missed-calls')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">📵 Missed Calls</a>
+            <a href="#" onclick="showSection('staff')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">👥 Leaves & Swaps</a>
+        </nav>
+        
+        <div class="p-4 border-t border-slate-700">
+            <button onclick="Auth.logout()" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 text-slate-300 rounded hover:bg-red-600 hover:text-white transition">
+                Logout
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col h-screen overflow-hidden relative">
+        
+        <!-- Mobile Header -->
+        <header class="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center shadow-md">
+            <div class="font-bold text-xl">DoSJE Official</div>
+            <button onclick="Auth.logout()" class="text-sm bg-slate-800 px-3 py-1 rounded">Logout</button>
+        </header>
+
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-24">
+
+            <!-- ===================== SECTION: DASHBOARD ===================== -->
+            <div id="sec-dashboard" class="content-section space-y-8">
+                
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h2 class="text-3xl font-bold text-slate-800">Division Overview</h2>
+                        <p class="text-slate-500 mt-1">Live metrics and risk analysis for your division.</p>
+                    </div>
+                    </div>
+                </div>
+
+                <!-- KPI Cards Row -->
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Total NGOs</p>
+                        <p class="text-2xl font-bold text-slate-800 mt-1" id="kpi-ngos">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Total Insp.</p>
+                        <p class="text-2xl font-bold text-slate-800 mt-1" id="kpi-total-insp">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Pending</p>
+                        <p class="text-2xl font-bold text-blue-600 mt-1" id="kpi-pending">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Completed</p>
+                        <p class="text-2xl font-bold text-green-600 mt-1" id="kpi-completed">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow border-b-4 border-red-500 flex flex-col justify-center items-center transform scale-105">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">High Risk</p>
+                        <p class="text-3xl font-black text-red-600 mt-1" id="kpi-high-risk">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Needs Review</p>
+                        <p class="text-2xl font-bold text-yellow-500 mt-1" id="kpi-review">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Normal</p>
+                        <p class="text-2xl font-bold text-emerald-500 mt-1" id="kpi-normal">-</p>
+                    </div>
+                </div>
+
+                <!-- Charts & Alerts Row -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- Chart: Risk Level -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4">Risk Level Distribution</h3>
+                        <div class="relative h-48 w-full">
+                            <canvas id="chart-risk"></canvas>
+                        </div>
+                    </div>
+                    <!-- Chart: Inspection Status -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4">Inspection Status</h3>
+                        <div class="relative h-48 w-full flex justify-center">
+                            <canvas id="chart-status"></canvas>
+                        </div>
+                    </div>
+                    <!-- Feed: AI Alerts -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col">
+                        <h3 class="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                            <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                            Recent AI Alerts
+                        </h3>
+                        <div class="flex-1 overflow-y-auto max-h-48 pr-2 space-y-3" id="ai-alerts-feed">
+                            <div class="text-sm text-slate-400 text-center mt-8">Loading alerts...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live CCTV Grid & Top Risk Projects -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    
+                    <!-- Top Risk Projects -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4">Top Risk Projects</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="text-xs text-slate-500 uppercase border-b">
+                                    <tr>
+                                        <th class="py-2">Project</th>
+                                        <th class="py-2">NGO</th>
+                                        <th class="py-2 text-right">Score</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="top-risk-table">
+                                    <tr><td colspan="3" class="py-4 text-center text-slate-400">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- CCTV Monitoring -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4 flex items-center justify-between">
+                            Live CCTV Monitoring
+                            <span class="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-1 rounded" id="cctv-count">0 Active</span>
+                        </h3>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="cctv-grid">
+                            <div class="text-sm text-slate-400 col-span-full">Loading feeds...</div>
+                        </div>
+                    </div>
+
+                </div>
+                
+                <!-- Active Inspections & Random Verification -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-8">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-slate-700">Scheduled Inspections</h3>
+                    </div>
+                    <ul id="inspections-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <li class="text-slate-500 text-sm">Loading inspections...</li>
+                    </ul>
+                </div>
+
+            <!-- ===================== SECTION: DISBURSEMENTS ===================== -->
+            <div id="sec-disbursements" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl border-t-4 border-emerald-500">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-emerald-700">Project Fund Disbursements</h2>
+                        <select id="disb-project-filter" class="border border-slate-300 p-2 rounded-lg bg-slate-50 text-sm" onchange="loadDisbursements()">
+                            <option value="">Select a project...</option>
+                        </select>
+                    </div>
+                    
+                    <div id="disb-summary" class="hidden mb-6 p-4 rounded-xl border">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-xs text-slate-500 uppercase font-bold">Total Logged Disbursements</p>
+                                <p class="text-2xl font-bold text-emerald-700" id="disb-total-logged">₹ 0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-slate-500 uppercase font-bold">Fund Utilized Claimed</p>
+                                <p class="text-2xl font-bold text-blue-700" id="disb-total-claimed">₹ 0.00</p>
+                            </div>
+                        </div>
+                        <div id="disb-mismatch-alert" class="hidden mt-4 p-3 bg-red-100 border border-red-200 text-red-800 text-sm rounded flex items-center gap-2 font-bold">
+                            ⚠️ MISMATCH DETECTED: The total logged disbursements do not match the NGO's claimed utilization!
+                        </div>
+                        <div id="disb-match-alert" class="hidden mt-4 p-3 bg-emerald-100 border border-emerald-200 text-emerald-800 text-sm rounded flex items-center gap-2 font-bold">
+                            ✅ VERIFIED: Logged disbursements match the claimed utilization perfectly.
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100 border-b">
+                                    <th class="p-3 text-sm font-bold text-slate-600">Date</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Beneficiary</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">PAN Number</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Amount</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Ref Number</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Receipt</th>
+                                </tr>
+                            </thead>
+                            <tbody id="disbursements-list">
+                                <tr><td colspan="6" class="p-4 text-slate-500 text-center">Select a project to view disbursements.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===================== SECTION: DUPLICATES ===================== -->
+            <div id="sec-duplicates" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl border-t-4 border-yellow-500">
+                    <h2 class="text-2xl font-bold mb-6 text-yellow-700">⚠️ Potential Duplicate Beneficiaries — Human Review Needed</h2>
+                    <div id="duplicates-list" class="space-y-4">
+                        <div class="text-slate-500">Loading duplicates...</div>
+                    </div>
+                </div>
+            </div>
+
+            
+
+            <!-- ===================== SECTION: STAFF (Leaves & Swaps & Activity) ===================== -->
+            <div id="sec-staff" class="content-section hidden space-y-8">
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Leave & Swap Requests -->
+                    <div class="bg-white shadow p-6 rounded-xl border-t-4 border-orange-500">
+                        <h2 class="text-2xl font-bold mb-6 text-orange-700">Leave & Swap Requests</h2>
+                        
+                        <h3 class="font-bold text-slate-700 mt-2 mb-3 bg-slate-50 p-2 rounded">Leave Applications</h3>
+                        <ul id="official-leave-list" class="space-y-3 mb-8">
+                            <li class="text-slate-500 text-sm">Loading leaves...</li>
+                        </ul>
+
+                        <h3 class="font-bold text-slate-700 mt-2 mb-3 bg-slate-50 p-2 rounded">Emergency Duty Swaps</h3>
+                        <ul id="official-swap-list" class="space-y-3">
+                            <li class="text-slate-500 text-sm">Loading swaps...</li>
+                        </ul>
+                    </div>
+
+                    <!-- Inspector Activity Log -->
+                    <div class="bg-white shadow p-6 rounded-xl border-t-4 border-blue-500">
+                        <h2 class="text-2xl font-bold mb-6 text-blue-700">Inspector Activity Log</h2>
+                        <div class="overflow-y-auto max-h-[600px]">
+                            <table class="w-full text-sm text-left text-slate-600">
+                                <thead class="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+                                    <tr>
+                                        <th scope="col" class="px-4 py-3">Inspector</th>
+                                        <th scope="col" class="px-4 py-3">Status</th>
+                                        <th scope="col" class="px-4 py-3 hidden sm:table-cell">Login Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inspector-activity-list" class="divide-y">
+                                    <tr><td colspan="3" class="px-4 py-4 text-center">Loading activity logs...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </main>
+</div>
+
+<!-- Modals (Jitsi, CCTV, Map) -->
+<div id="jitsi-modal" class="fixed inset-0 bg-black bg-opacity-80 hidden flex justify-center items-center z-[100]">
+    <div class="bg-white w-full max-w-5xl h-[85vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
+        <div class="flex justify-between items-center p-4 bg-slate-900 text-white">
+            <h3 class="font-bold">Inspection Video Call</h3>
+            <button onclick="closeJitsiModal()" class="bg-red-500 hover:bg-red-600 px-4 py-1 rounded font-bold transition">End Call</button>
+        </div>
+        <div id="jitsi-container" class="flex-grow bg-black"></div>
+    </div>
+</div>
+
+<div id="cctv-modal" class="fixed inset-0 bg-black bg-opacity-90 hidden flex justify-center items-center z-[100] p-4">
+    <div class="w-full max-w-4xl flex flex-col bg-slate-900 rounded-xl overflow-hidden shadow-2xl border border-slate-700">
+        <div class="flex justify-between items-center p-4 text-white border-b border-slate-700">
+            <h3 id="cctv-title" class="font-bold flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                Live Stream
+            </h3>
+            <button onclick="closeCctvModal()" class="text-slate-400 hover:text-white transition">✖ Close</button>
+        </div>
+        <div class="bg-black w-full aspect-video flex justify-center items-center overflow-hidden">
+            <img id="cctv-img" class="w-full h-full object-contain" alt="Live Camera Feed" />
+        </div>
+    </div>
+</div>
+
+<div id="map-modal" class="fixed inset-0 bg-black bg-opacity-80 hidden flex justify-center items-center z-[100] p-4">
+    <div class="bg-white w-full max-w-4xl h-[70vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
+        <div class="flex justify-between items-center p-4 bg-blue-700 text-white">
+            <h3 class="font-bold">Inspector GPS Location</h3>
+            <button onclick="closeMapModal()" class="text-blue-200 hover:text-white transition">✖ Close</button>
+        </div>
+        <div id="map-container" class="flex-grow w-full h-full relative z-0"></div>
+    </div>
+</div>
+
+<script>
+    // --- CALL RETRY CONSTANTS ---
+    // Change these values (in milliseconds) to adjust retry wait times for testing.
+    const CALL_RETRY_INTERVAL_1 = 30 * 1000; // 30 SECONDS (For quick testing - Default is 10 mins)
+    const CALL_RETRY_INTERVAL_2 = 60 * 1000; // 60 SECONDS (For quick testing - Default is 30 mins)
+    // ----------------------------
+
+    let ngosData = [];
+    let projectsData = [];
+    let inspectionsData = [];
+    let inspectorsData = [];
+    let jitsiApi = null;
+    let chartRiskInstance = null;
+    let chartStatusInstance = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadAllData();
+        document.getElementById('schedule-form').addEventListener('submit', scheduleInspection);
+        
+        // Default datetime to now
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('schedule-time').value = now.toISOString().slice(0, 16);
+
+        setInterval(loadAllData, 30000);
+    });
+
+    function showSection(sectionId) {
+        document.querySelectorAll('.content-section').forEach(el => el.classList.add('hidden'));
+        document.getElementById('sec-' + sectionId).classList.remove('hidden');
+        
+        document.querySelectorAll('.nav-link').forEach(el => {
+            el.classList.remove('bg-blue-600', 'text-white');
+            el.classList.add('text-slate-300', 'hover:bg-slate-800');
+        });
+        const activeLink = document.querySelector(`a[onclick="showSection('${sectionId}')"]`);
+        if(activeLink) {
+            activeLink.classList.remove('text-slate-300', 'hover:bg-slate-800');
+            activeLink.classList.add('bg-blue-600', 'text-white');
+        }
+    }
+
+    async function loadAllData() {
+        await loadProjectsAndKPIs(); // Must load first to populate projectsData and ngosData
+        await Promise.all([
+            loadInspections(),
+            loadAnomalies(),
+            loadReports(),
+            loadNssReports(),
+            loadDuplicates(),
+            loadInspectorActivity(),
+            loadLeavesAndSwaps()
+        ]);
+        renderCharts();
+    }
+
+    function timeAgo(dateString) {
+        const date = new Date(dateString);
+        const seconds = Math.floor((new Date() - date) / 1000);
+        let interval = seconds / 3600;
+        if (interval > 24) return Math.floor(interval/24) + "d ago";
+        if (interval >= 1) return Math.floor(interval) + "h ago";
+        interval = seconds / 60;
+        if (interval >= 1) return Math.floor(interval) + "m ago";
+        return Math.floor(seconds) + "s ago";
+    }
+
+    async function loadProjectsAndKPIs() {
+        try {
+            const [ngoRes, projRes, inspUserRes, ngoUsersRes] = await Promise.all([
+                Auth.fetchWithAuth('/api/ngos/'),
+                Auth.fetchWithAuth('/api/projects/'),
+                Auth.fetchWithAuth('/api/users/?role=inspector'),
+                Auth.fetchWithAuth('/api/users/?role=ngo')
+            ]);
+            
+            const ngos = await ngoRes.json();
+            ngosData = ngos;
+            projectsData = await projRes.json();
+            inspectorsData = await inspUserRes.json();
+            const ngoUsers = await ngoUsersRes.json();
+            const inspectors = inspectorsData;
+
+            // Populate Dropdowns
+            const projSelect = document.getElementById('schedule-project');
+            if(projSelect.options.length <= 1) {
+                projSelect.innerHTML = '<option value="">Select a project...</option>';
+                projectsData.forEach(p => projSelect.innerHTML += `<option value="${p.id}">${p.title}</option>`);
+            }
+
+            // KPIs
+            document.getElementById('kpi-ngos').textContent = ngos.length;
+            
+            // NGO Directory List
+            const ngoList = document.getElementById('ngo-directory-list');
+            ngoList.innerHTML = '';
+            if (ngoUsers.length === 0) ngoList.innerHTML = '<li class="text-slate-500">No NGO users found.</li>';
+            ngoUsers.forEach(u => {
+                ngoList.innerHTML += `
+                    <li class="bg-slate-50 p-4 rounded-xl border flex justify-between items-center hover:shadow-sm transition">
+                        <div>
+                            <p class="font-bold text-slate-800">${u.ngo_name || 'Unassigned NGO'}</p>
+                            <p class="text-xs text-slate-500">User: ${u.first_name} ${u.last_name} (${u.username})</p>
+                        </div>
+                        <button onclick="startDirectCall(${u.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg font-bold shadow flex items-center gap-2 text-sm">
+                            📞 Call
+                        </button>
+                    </li>
+                `;
+            });
+
+            let highCount = 0, reviewCount = 0, normalCount = 0;
+            const topRiskList = [...projectsData].sort((a,b) => b.risk_score - a.risk_score);
+
+            topRiskList.forEach(p => {
+                if (p.risk_status === 'High Risk') highCount++;
+                else if (p.risk_status === 'Needs Review') reviewCount++;
+                else normalCount++;
+            });
+
+            document.getElementById('kpi-high-risk').textContent = highCount;
+            document.getElementById('kpi-review').textContent = reviewCount;
+            document.getElementById('kpi-normal').textContent = normalCount;
+
+            // Top Risk Table
+            const tbody = document.getElementById('top-risk-table');
+            tbody.innerHTML = '';
+            topRiskList.slice(0,5).forEach(p => {
+                let badgeClass = 'bg-emerald-100 text-emerald-800';
+                if (p.risk_status === 'High Risk') badgeClass = 'bg-red-100 text-red-800';
+                else if (p.risk_status === 'Needs Review') badgeClass = 'bg-yellow-100 text-yellow-800';
+                
+                tbody.innerHTML += `
+                    <tr class="border-b last:border-0 hover:bg-slate-50 transition">
+                        <td class="py-3 pr-2 font-medium"><div class="flex flex-col"><span class="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-bold self-start mb-0.5 uppercase tracking-wider">${p.scheme_name || "SCHEME"}</span><span class="truncate max-w-[150px] block" title="${p.title}">${p.title}</span></div></td>
+                        <td class="py-3 px-2 text-slate-500 truncate max-w-[100px]">NGO #${p.ngo}</td>
+                        <td class="py-3 pl-2 text-right">
+                            <div class="flex items-center justify-end gap-2">
+                                <span class="font-bold">${p.risk_score}</span>
+                                <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded ${badgeClass}">${p.risk_status}</span>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            // CCTV Grid
+            const cctvGrid = document.getElementById('cctv-grid');
+            cctvGrid.innerHTML = '';
+            let activeCctv = 0;
+            
+            projectsData.forEach(p => {
+                if(p.cameras) {
+                    p.cameras.forEach(c => {
+                        if(c.is_working) {
+                            activeCctv++;
+                            cctvGrid.innerHTML += `
+                                <div onclick="openCctvModal('http://10.83.95.112:8080/video', '${c.name.replace(/'/g, "\\'")}')" 
+                                     class="relative group cursor-pointer rounded-lg overflow-hidden border border-slate-200 bg-slate-800 aspect-video flex items-center justify-center shadow-sm">
+                                    <div class="absolute inset-0 bg-slate-900 opacity-50 group-hover:opacity-30 transition"></div>
+                                    <span class="text-white text-xs z-10 p-2 text-center font-medium">${c.name}</span>
+                                    <div class="absolute top-2 right-2 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded backdrop-blur">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                                        <span class="text-[9px] text-white font-bold tracking-widest uppercase">Live</span>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+                }
+            });
+            document.getElementById('cctv-count').textContent = `${activeCctv} Active`;
+            if(activeCctv === 0) cctvGrid.innerHTML = '<div class="text-sm text-slate-400 col-span-full">No active cameras.</div>';
+
+        } catch (e) {}
+    }
+
+    async function loadAnomalies() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/anomalies/');
+            const anomalies = await res.json();
+            const feed = document.getElementById('ai-alerts-feed');
+            feed.innerHTML = '';
+            
+            if(anomalies.length === 0) {
+                feed.innerHTML = '<div class="text-sm text-slate-400 text-center mt-8">No recent alerts.</div>';
+                return;
+            }
+
+            anomalies.slice(0,10).forEach(a => {
+                const color = a.severity === 'high' ? 'text-red-600 bg-red-50 border-red-200' : 
+                             (a.severity === 'medium' ? 'text-orange-600 bg-orange-50 border-orange-200' : 'text-blue-600 bg-blue-50 border-blue-200');
+                
+                feed.innerHTML += `
+                    <div class="p-3 rounded-lg border ${color} text-sm">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="font-bold uppercase text-[10px] tracking-wider">${a.type.replace('_', ' ')}</span>
+                            <span class="text-[10px] opacity-70 font-medium">${timeAgo(a.flagged_at)}</span>
+                        </div>
+                        <p class="font-medium text-slate-800 mb-1 leading-snug">${a.description}</p>
+                        <p class="text-[10px] text-slate-500 truncate uppercase font-bold tracking-wider">${a.project_name} • ${a.ngo_name}</p>
+                    </div>
+                `;
+            });
+        } catch(e) {}
+    }
+
+    async function loadInspections() {
+        const res = await Auth.fetchWithAuth('/api/inspections/');
+        inspectionsData = await res.json();
+        
+        document.getElementById('kpi-total-insp').textContent = inspectionsData.length;
+        
+        let pending = 0, completed = 0, in_progress = 0;
+        const list = document.getElementById('inspections-list');
+        list.innerHTML = '';
+        
+        const now = new Date();
+        
+        inspectionsData.forEach(i => {
+            if(i.status === 'completed') completed++;
+            else if(i.status === 'in_progress') in_progress++;
+            else pending++;
+
+            if(i.status !== 'completed') {
+                const schedTime = new Date(i.scheduled_time);
+                
+                const proj = projectsData.find(p => p.id === i.project);
+                const inspector = i.assignments && i.assignments.length > 0 ? i.assignments[0].inspector_name : 'N/A';
+                
+                let statusBadge = `<span class="text-blue-600 font-bold capitalize">${i.status.replace('_', ' ')}</span>`;
+                if (i.status === 'in_progress') statusBadge = `<span class="text-emerald-600 font-bold">In Progress</span>`;
+                if (i.status === 'pending') statusBadge = `<span class="text-yellow-600 font-bold">Pending</span>`;
+                
+                const cctvAction = proj && proj.cctv_stream_url 
+                    ? `<button onclick="openCctvModal('${proj.cctv_stream_url}', '${proj.title}')" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block"></span>CCTV</button>` 
+                    : '';
+                    
+                const locationAction = `<button onclick="trackLocation(${i.id})" class="text-xs font-bold text-blue-600 hover:text-blue-800">📍 Track GPS</button>`;
+                
+                list.innerHTML += `
+                    <li class="border border-slate-200 rounded-lg p-4 bg-slate-50 hover:bg-slate-100 transition flex flex-col justify-between">
+                        <div>
+                            <p class="font-bold text-slate-800 text-sm mb-1">${proj ? proj.title : 'Project'}</p>
+                            <p class="text-[11px] text-slate-500">Insp ID: #${i.id}</p>
+                            <p class="text-[11px] text-slate-500">Inspector: ${inspector}</p>
+                            <p class="text-[11px] text-slate-500">Time: ${schedTime.toLocaleString()}</p>
+                            <p class="text-[11px] text-slate-500 mb-3 mt-1">Status: ${statusBadge}</p>
+                        </div>
+                        <div class="flex gap-4 mt-auto border-t border-slate-200 pt-3">
+                            ${locationAction}
+                            ${cctvAction}
+                        </div>
+                    </li>
+                `;
+            }
+        });
+        
+        if (list.innerHTML === '') {
+            list.innerHTML = '<li class="text-slate-400 text-sm p-4 text-center w-full col-span-full">No scheduled inspections at the moment.</li>';
+        }
+        
+        document.getElementById('kpi-pending').textContent = pending;
+        document.getElementById('kpi-completed').textContent = completed;
+        document.getElementById('kpi-active').textContent = in_progress;
+        
+        pollVerificationStatus();
+    }
+
+    
+
+
+    
+    async function startRandomVerification() {
+        try {
+            const btn = document.getElementById('btn-start-random-vc');
+            btn.disabled = true;
+            btn.textContent = 'Selecting...';
+            
+            const res = await Auth.fetchWithAuth('/api/inspections/pick-random-active/', { method: 'POST' });
+            if (res.ok) {
+                pollVerificationStatus();
+            } else {
+                const err = await res.json();
+                alert("Failed: " + err.error);
+            }
+            btn.disabled = false;
+            btn.textContent = 'Start Random Verification';
+        } catch (e) {
+            alert('Error starting verification');
+            document.getElementById('btn-start-random-vc').disabled = false;
+        }
+    }
+    
+    let currentPollingTimeout = null;
+    
+    async function pollVerificationStatus() {
+        if (currentPollingTimeout) clearTimeout(currentPollingTimeout);
+        try {
+            const res = await Auth.fetchWithAuth('/api/inspections/check-verification-status/');
+            const data = await res.json();
+            
+            const statusDiv = document.getElementById('random-vc-status');
+            if (!statusDiv) return;
+            
+            if (data.status === 'none') {
+                statusDiv.classList.add('hidden');
+            } else {
+                statusDiv.classList.remove('hidden');
+                document.getElementById('random-vc-details').innerHTML = `
+                    <p><strong>Insp ID:</strong> #${data.inspection.id}</p>
+                    <p><strong>Inspector:</strong> ${data.inspector_name}</p>
+                    <p><strong>Project:</strong> ${data.project_name}</p>
+                    <p><strong>Event Status:</strong> <span class="uppercase tracking-wider font-bold text-xs px-2 py-1 rounded ${getBadgeColor(data.status)}">${data.status}</span></p>
+                `;
+                
+                const actionDiv = document.getElementById('random-vc-action');
+                if (data.status === 'pending') {
+                    actionDiv.innerHTML = `<p class="text-xs text-slate-500 italic animate-pulse">Waiting for Inspector to respond (Attempt ${data.attempt_number})...</p>`;
+                    currentPollingTimeout = setTimeout(pollVerificationStatus, 3000);
+                } else if (data.status === 'in_progress') {
+                    actionDiv.innerHTML = `<button onclick="openJitsiModal('${data.jitsi_room_name}')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded shadow">Join VC Room</button>`;
+                    currentPollingTimeout = setTimeout(pollVerificationStatus, 10000);
+                } else if (data.status === 'no_response') {
+                    actionDiv.innerHTML = `
+                        <p class="text-xs text-red-500 font-bold mb-2">No Response from Inspector.</p>
+                        <button onclick="retryVerification(${data.event_id})" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-1 px-3 rounded shadow text-sm">Retry VC</button>
+                    `;
+                } else if (data.status === 'missed' || data.status === 'declined') {
+                    actionDiv.innerHTML = `<p class="text-xs text-red-600 font-bold">Verification Exception — Further Review Required.</p>`;
+                } else if (data.status === 'completed') {
+                    actionDiv.innerHTML = `<p class="text-xs text-emerald-600 font-bold">Verification Completed Successfully.</p>`;
+                }
+            }
+        } catch (e) {}
+    }
+    
+    function getBadgeColor(status) {
+        if (status === 'pending') return 'bg-yellow-100 text-yellow-800';
+        if (status === 'in_progress') return 'bg-blue-100 text-blue-800';
+        if (status === 'completed') return 'bg-green-100 text-green-800';
+        if (status === 'no_response' || status === 'declined' || status === 'missed') return 'bg-red-100 text-red-800';
+        return 'bg-slate-100 text-slate-800';
+    }
+    
+    async function retryVerification(eventId) {
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/${eventId}/retry-verification/`, { method: 'POST' });
+            if (res.ok) {
+                pollVerificationStatus();
+            }
+        } catch (e) {}
+    }
+
+
+    async function trackLocation(inspectionId) {
+        // Open map immediately with a waiting message
+        openMapModal(20.5937, 78.9629, "<b>Waiting for Inspector's GPS signal...</b><br>Please keep this window open.");
+        
+        // Setup polling every 10s
+        if (liveTrackingInterval) clearInterval(liveTrackingInterval);
+        
+        const fetchLocation = async () => {
+            try {
+                // Add timestamp to prevent caching 404s
+                const pollRes = await Auth.fetchWithAuth(`/api/inspections/${inspectionId}/live-location/?t=${Date.now()}`);
+                if (pollRes.ok) {
+                    const loc = await pollRes.json();
+                    if (window.mapInstance && window.currentMapMarker) {
+                        const newLatLng = new L.LatLng(loc.lat, loc.lng);
+                        window.currentMapMarker.setLatLng(newLatLng);
+                        window.mapInstance.panTo(newLatLng);
+                        
+                        const timeStr = new Date(loc.timestamp).toLocaleTimeString();
+                        window.currentMapMarker.setPopupContent(`<b>Inspector (Live)</b><br>Updated: ${timeStr}`);
+                    }
+                }
+            } catch(e) { console.error("Error polling location", e); }
+        };
+
+        // Do first fetch immediately
+        fetchLocation();
+        
+        liveTrackingInterval = setInterval(fetchLocation, 10000);
+    }
+
+    function closeMapModal() { 
+        document.getElementById('map-modal').classList.add('hidden'); 
+        if (liveTrackingInterval) {
+            clearInterval(liveTrackingInterval);
+            liveTrackingInterval = null;
+        }
+    }
+
+        async function loadReports() {
+        const res = await Auth.fetchWithAuth('/api/reports/');
+        const reports = await res.json();
+        const list = document.getElementById('reports-list');
+        list.innerHTML = '';
+        if(reports.length === 0) return list.innerHTML = '<li class="text-slate-500 p-4">No reports.</li>';
+
+        reports.forEach(r => {
+            const insp = inspectionsData.find(i => i.id === r.inspection);
+            const proj = insp ? projectsData.find(p => p.id === insp.project) : null;
+            const assignment = insp && insp.assignments && insp.assignments.length > 0 ? insp.assignments[0] : null;
+            const inspectorUser = assignment ? inspectorsData.find(u => u.id === assignment.inspector) : null;
+            
+            let projName = proj ? `<span class="text-xs bg-slate-800 text-white px-2 py-0.5 rounded font-bold mr-2">${proj.scheme_name || 'SCHEME'}</span>` + proj.title : 'Unknown Project';
+            if (proj && ngosData) {
+                const ngo = ngosData.find(n => n.id === proj.ngo);
+                if (ngo) projName += ` <span class="text-xs text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 ml-2">NGO: ${ngo.name}</span>`;
+            }
+            const inspName = inspectorUser ? (inspectorUser.first_name + ' ' + inspectorUser.last_name).trim() || inspectorUser.username : 'Unknown Inspector';
+            const timeStr = r.submitted_at ? new Date(r.submitted_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Date Not Available';
+
+            let statusBadge = r.status === 'finalized' ? `<span class="bg-blue-100 text-blue-800 text-[10px] uppercase font-bold px-2 py-1 rounded">Finalized</span>` : `<span class="bg-slate-200 text-slate-600 text-[10px] uppercase font-bold px-2 py-1 rounded">Draft</span>`;
+            
+            let advancedStatus = '';
+            let complianceScore = r.compliance_percentage != null ? Number(r.compliance_percentage).toFixed(1) : 'N/A';
+            let finalStatusBadge = '';
+            
+            if(r.status === 'finalized' && r.final_status) {
+                if(r.final_status.includes('Critical')) finalStatusBadge = '<span class="bg-red-100 text-red-800 px-2 py-1 rounded font-bold">🔴 ' + r.final_status + '</span>';
+                else if(r.final_status.includes('Needs')) finalStatusBadge = '<span class="bg-orange-100 text-orange-800 px-2 py-1 rounded font-bold">🟡 ' + r.final_status + '</span>';
+                else finalStatusBadge = '<span class="bg-emerald-100 text-emerald-800 px-2 py-1 rounded font-bold">🟢 ' + r.final_status + '</span>';
+                
+                let critical = 0, major = 0, minor = 0;
+                if(r.violations) {
+                    r.violations.forEach(v => {
+                        if(v.severity==='critical') critical++;
+                        else if(v.severity==='major') major++;
+                        else minor++;
+                    });
+                }
+                let cctvText = r.cctv_status ? `CCTV: <b>${r.cctv_status}</b>` : 'CCTV: N/A';
+                
+                advancedStatus = `
+                <div class="mt-4 bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-inner grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                    <div class="text-center border-r border-slate-200">
+                        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Compliance Score</div>
+                        <div class="text-3xl font-black text-slate-800">${complianceScore}%</div>
+                    </div>
+                    <div class="md:col-span-2">
+                        <div class="flex gap-2 mb-2">
+                            <span class="bg-red-50 text-red-700 px-2 py-1 rounded border border-red-100 text-xs font-bold">🔴 Critical: ${critical}</span>
+                            <span class="bg-orange-50 text-orange-700 px-2 py-1 rounded border border-orange-100 text-xs font-bold">🟠 Major: ${major}</span>
+                            <span class="bg-yellow-50 text-yellow-700 px-2 py-1 rounded border border-yellow-100 text-xs font-bold">🟡 Minor: ${minor}</span>
+                        </div>
+                        <div class="text-xs text-slate-500">Evidence Files: <b>${r.evidence_set ? r.evidence_set.length : 0}</b> | ${cctvText}</div>
+                        <div class="text-[10px] mt-1 bg-yellow-50 text-yellow-800 px-2 py-1 inline-block rounded">⚠️ Comparing with previous visit... (AI Analysis Active)</div>
+                    </div>
+                    <div class="text-right">
+                        ${finalStatusBadge}
+                    </div>
+                </div>`;
+            }
+
+            // Maps button logic... (retained from original)
+            const ev = r.evidence_set?.find(e => e.geo_lat && e.geo_lng);
+            let mapBtn = '';
+            let locBadge = '';
+
+            if (ev) {
+                mapBtn = `<button onclick="openMapModal(${ev.geo_lat}, ${ev.geo_lng})" class="mt-3 text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-200 hover:bg-indigo-100 font-medium transition shadow-sm">📍 View GPS</button>`;
+                
+                const hasCoords = proj && proj.latitude !== null && proj.longitude !== null;
+
+                if (hasCoords) {
+                    if (ev.location_flagged) {
+                        locBadge = `<span class="bg-red-100 text-red-800 text-[10px] uppercase font-bold px-2 py-1 rounded ml-2">⚠️ Outside expected radius</span>`;
+                    } else {
+                        locBadge = `<span class="bg-emerald-100 text-emerald-800 text-[10px] uppercase font-bold px-2 py-1 rounded ml-2">📍 Location Consistency Verified</span>`;
+                    }
+                } else {
+                    locBadge = `<span class="bg-slate-100 text-slate-500 text-[10px] uppercase font-bold px-2 py-1 rounded ml-2">📍 GPS Captured (No Site Coordinates)</span>`;
+                }
+            }
+
+            let thumbnails = '';
+            if (r.evidence_set && r.evidence_set.length > 0) {
+                thumbnails = '<div class="mt-3 flex gap-2 overflow-x-auto py-2">';
+                r.evidence_set.forEach(e => {
+                    thumbnails += `<a href="${e.file}" target="_blank" class="block shrink-0 border border-slate-200 rounded-lg overflow-hidden hover:border-blue-400 transition shadow-sm" title="View Full Size">
+                        <img src="${e.file}" class="w-16 h-16 object-cover" alt="Evidence">
+                    </a>`;
+                });
+                thumbnails += '</div>';
+            }
+
+            list.innerHTML += `
+                <li class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h4 class="font-bold text-slate-800 text-lg leading-tight">${projName}</h4>
+                            <p class="text-sm text-slate-500 mt-1">Inspected by: <span class="font-bold">${inspName}</span> &bull; ${timeStr}</p>
+                        </div>
+                        <div class="flex gap-2 items-center">
+                            ${statusBadge}
+                        </div>
+                    </div>
+                    ${locBadge}
+                    
+                    <!-- NEW REPORT DETAILS -->
+                    <div class="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-200 pb-1">Checklist Responses</div>
+                        <ul class="text-sm text-slate-700 space-y-1.5 mb-3">
+                            ${r.checklist_answers && r.checklist_answers.length > 0 
+                                ? r.checklist_answers.map(ans => `<li class="flex items-start gap-2"><span class="${ans.is_compliant ? 'text-emerald-500' : 'text-red-500'} font-bold">${ans.is_compliant ? '✅' : '❌'}</span> <span><b>[${ans.category}]</b> ${ans.question}</span></li>`).join('')
+                                : '<li class="italic text-slate-400">No checklist recorded.</li>'}
+                        </ul>
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-200 pb-1 mt-3">Qualitative Findings</div>
+                        <p class="text-sm text-slate-700 whitespace-pre-wrap">${r.findings || '<i>No qualitative findings recorded.</i>'}</p>
+                    </div>
+                    
+                    ${advancedStatus}
+                    <div class="flex items-center gap-4">
+                        ${mapBtn}
+                        <div class="flex-grow">
+                            ${thumbnails}
+                        </div>
+                    </div>
+                </li>
+            `;
+        });
+    }
+
+    async function loadNssReports() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/nss-reports/');
+            const reports = await res.json();
+            const list = document.getElementById('nss-reports-list');
+            list.innerHTML = '';
+            if(reports.length === 0) return list.innerHTML = '<li class="text-slate-500">No NSS reports found in your division.</li>';
+
+            reports.forEach(r => {
+                let statusBadge = '';
+                if(r.scheme_implementation_status === 'proper') statusBadge = '<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-xs font-bold uppercase">Proper</span>';
+                else if(r.scheme_implementation_status === 'partial') statusBadge = '<span class="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-xs font-bold uppercase">Partial</span>';
+                else statusBadge = '<span class="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs font-bold uppercase">Not Implemented</span>';
+                
+                list.innerHTML += `
+                    <li class="bg-white p-4 rounded-xl shadow-sm border border-indigo-100 relative">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h4 class="font-bold text-slate-800 text-sm">${r.project_title}</h4>
+                                <p class="text-xs text-slate-500 mt-0.5">By: <span class="font-bold">${r.nss_volunteer_name}</span></p>
+                            </div>
+                            ${statusBadge}
+                        </div>
+                        <p class="text-sm text-slate-700 my-3 bg-slate-50 p-3 rounded italic">"${r.findings}"</p>
+                        <div class="flex justify-between items-center text-xs text-slate-400 border-t pt-2 mt-2">
+                            <span>${new Date(r.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
+                            ${r.photo ? `<a href="${r.photo}" target="_blank" class="text-indigo-600 font-bold hover:underline flex items-center gap-1">📸 View Photo</a>` : '<span class="text-slate-300">No Photo</span>'}
+                        </div>
+                    </li>
+                `;
+            });
+        } catch(e) { console.error('Failed to load NSS reports', e); }
+    }
+
+    
+        async function loadMissedCalls() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/call-logs/');
+            const data = await res.json();
+            const list = document.getElementById('missed-calls-list');
+            if(!list) return;
+            
+            list.innerHTML = '';
+            
+            const missedData = data.filter(d => d.status === 'missed');
+            if(missedData.length === 0) {
+                list.innerHTML = '<tr><td colspan="5" class="p-4 text-slate-500 text-center">No missed calls recorded.</td></tr>';
+                return;
+            }
+            
+            missedData.forEach(d => {
+                list.innerHTML += `
+                    <tr class="border-b hover:bg-slate-50">
+                        <td class="p-3 text-sm">${new Date(d.timestamp).toLocaleString()}</td>
+                        <td class="p-3 text-sm font-bold text-slate-800">${d.caller_name}</td>
+                        <td class="p-3 text-sm font-bold text-slate-800">${d.callee_name}</td>
+                        <td class="p-3 text-sm text-red-600 font-bold">Attempt ${d.attempt_number}</td>
+                        <td class="p-3 text-sm"><span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-bold uppercase">${d.status}</span></td>
+                    </tr>
+                `;
+            });
+        } catch(e) { console.error('Failed to load missed calls', e); }
+    }
+
+    async function loadDisbursements() {
+        const projectId = document.getElementById('disb-project-filter').value;
+        const list = document.getElementById('disbursements-list');
+        const summary = document.getElementById('disb-summary');
+        
+        if(!projectId) {
+            list.innerHTML = '<tr><td colspan="6" class="p-4 text-slate-500 text-center">Select a project to view disbursements.</td></tr>';
+            summary.classList.add('hidden');
+            return;
+        }
+        
+        list.innerHTML = '<tr><td colspan="6" class="p-4 text-slate-500 text-center">Loading disbursements...</td></tr>';
+        
+        try {
+            const res = await Auth.fetchWithAuth(`/api/disbursements/?project=${projectId}`);
+            const data = await res.json();
+            
+            list.innerHTML = '';
+            
+            let totalDisbursed = 0;
+            
+            if(data.length === 0) {
+                list.innerHTML = '<tr><td colspan="6" class="p-4 text-slate-500 text-center">No disbursements logged yet.</td></tr>';
+            } else {
+                data.forEach(d => {
+                    totalDisbursed += parseFloat(d.amount);
+                    list.innerHTML += `
+                        <tr class="border-b hover:bg-slate-50">
+                            <td class="p-3 text-sm">${new Date(d.disbursed_date).toLocaleDateString()}</td>
+                            <td class="p-3 text-sm font-bold">${d.beneficiary_name}</td>
+                            <td class="p-3 text-sm text-slate-600">${d.beneficiary_pan}</td>
+                            <td class="p-3 text-sm font-bold text-emerald-600">₹${parseFloat(d.amount).toLocaleString('en-IN')}</td>
+                            <td class="p-3 text-sm text-slate-500">${d.transaction_reference_number}</td>
+                            <td class="p-3 text-sm">
+                                ${d.receipt ? `<a href="${d.receipt}" target="_blank" class="text-blue-600 hover:underline">View</a>` : '<span class="text-slate-300">-</span>'}
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+            
+            // Show summary
+            summary.classList.remove('hidden');
+            document.getElementById('disb-total-logged').textContent = '₹ ' + totalDisbursed.toLocaleString('en-IN');
+            
+            const proj = projectsData.find(p => p.id == projectId);
+            const claimed = proj ? parseFloat(proj.fund_utilized_claimed || 0) : 0;
+            document.getElementById('disb-total-claimed').textContent = '₹ ' + claimed.toLocaleString('en-IN');
+            
+            const mismatchAlert = document.getElementById('disb-mismatch-alert');
+            const matchAlert = document.getElementById('disb-match-alert');
+            
+            if (totalDisbursed !== claimed) {
+                mismatchAlert.classList.remove('hidden');
+                matchAlert.classList.add('hidden');
+            } else {
+                mismatchAlert.classList.add('hidden');
+                if(claimed > 0) matchAlert.classList.remove('hidden');
+                else matchAlert.classList.add('hidden');
+            }
+            
+        } catch(e) { console.error('Failed to load disbursements', e); }
+    }
+
+    async function loadDuplicates() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/beneficiaries/');
+            const data = await res.json();
+            const potentials = data.filter(b => b.duplicate_status === 'potential');
+            
+            const list = document.getElementById('duplicates-list');
+            list.innerHTML = '';
+            
+            if (potentials.length === 0) {
+                list.innerHTML = '<div class="text-slate-500">No potential duplicates detected at this time.</div>';
+                return;
+            }
+            
+            potentials.forEach(b => {
+                list.innerHTML += `
+                    <div class="p-4 border border-yellow-200 bg-yellow-50 rounded-xl shadow-sm">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-white p-3 rounded border border-slate-200">
+                                <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">New Entry</div>
+                                <div class="font-bold text-slate-800">${b.name}</div>
+                                <div class="text-xs text-slate-500">ID: ${b.unique_id}</div>
+                                <div class="text-xs text-slate-500">Project ID: ${b.project}</div>
+                            </div>
+                            <div class="bg-white p-3 rounded border border-slate-200">
+                                <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Potential Match (Original)</div>
+                                <div class="font-bold text-slate-800">${b.duplicate_of_name}</div>
+                                <div class="text-xs text-slate-500">ID: ${b.duplicate_of_unique_id}</div>
+                                <div class="text-xs text-slate-500">Project: ${b.duplicate_of_project}</div>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex gap-3 justify-end">
+                            <button onclick="actionDuplicate(${b.id}, 'dismiss')" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm rounded transition shadow-sm">
+                                Dismiss (Not a Duplicate)
+                            </button>
+                            <button onclick="actionDuplicate(${b.id}, 'confirm')" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded transition shadow-sm">
+                                Confirm Duplicate
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    async function actionDuplicate(id, action) {
+        if (!confirm(`Are you sure you want to ${action} this potential duplicate?`)) return;
+        try {
+            const res = await Auth.fetchWithAuth(`/api/beneficiaries/${id}/${action}_duplicate/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            });
+            if (res.ok) {
+                alert(`Duplicate has been ${action}ed.`);
+                loadDuplicates();
+            } else {
+                alert(`Failed to ${action} duplicate.`);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Network error.");
+        }
+    }
+
+    async function verifySystemIntegrity() {
+        const badge = document.getElementById('integrity-badge');
+        badge.classList.remove('hidden');
+        badge.className = 'text-center p-4 mb-6 rounded-xl font-bold border bg-slate-100 text-slate-800 shadow-inner';
+        badge.textContent = 'Verifying blockchain integrity...';
+        try {
+            const res = await Auth.fetchWithAuth('/api/reports/verify/');
+            const data = await res.json();
+            if (data.verified) {
+                badge.className = 'text-center p-4 mb-6 rounded-xl font-bold border bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm';
+                badge.textContent = '✓ Blockchain verified securely';
+            } else {
+                badge.className = 'text-center p-4 mb-6 rounded-xl font-bold border bg-red-50 text-red-700 border-red-200 shadow-sm';
+                badge.textContent = `✗ TAMPERING DETECTED AT BLOCK #${data.broken_at_index} (${data.reason})`;
+            }
+        } catch(e) {}
+    }
+    async function testSecurityValidation(reportId) {
+        // Prompt for beneficiaries
+        const bncInput = prompt(`Testing Security for Report #${reportId}\n\nEnter Beneficiaries Verified Count:`, "9999");
+        if (bncInput === null) return; // User cancelled
+
+        // Prompt for funds
+        const fundInput = prompt(`Testing Security for Report #${reportId}\n\nEnter Funds Utilized Verified:`, "99999999.99");
+        if (fundInput === null) return; // User cancelled
+
+        try {
+            const payload = {
+                beneficiaries_verified_count: parseInt(bncInput, 10),
+                fund_utilized_verified: parseFloat(fundInput)
+            };
+
+            const res = await Auth.fetchWithAuth(`/api/reports/${reportId}/finalize/`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+            
+            if (!res.ok) {
+                alert(`Security Demo Success!\n\nReport #${reportId} backend securely rejected the data with Status ${res.status}.\n\nRejection Reason: ${data.error}`);
+            } else {
+                alert(`Validation Passed!\n\nThe backend successfully accepted the valid data (Status 200 OK) for Report #${reportId}.\n\nBlockchain Block Hash: ${data.block_hash}`);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error running security test.");
+        }
+    }
+
+    async function runAiScheduler() {
+        const btn = document.getElementById('ai-schedule-btn');
+        const resDiv = document.getElementById('ai-schedule-result');
+        
+        btn.disabled = true;
+        btn.textContent = 'Analyzing and Scheduling...';
+        resDiv.classList.add('hidden');
+        resDiv.innerHTML = '';
+
+        try {
+            const res = await Auth.fetchWithAuth('/api/inspections/auto-schedule/', {
+                method: 'POST'
+            });
+            const data = await res.json();
+            
+            resDiv.classList.remove('hidden');
+            if (res.ok) {
+                let html = `<div class="text-green-300 font-bold mb-2">${data.message}</div>`;
+                if (data.scheduled && data.scheduled.length > 0) {
+                    html += `<ul class="list-disc pl-4 text-white mb-2">`;
+                    data.scheduled.forEach(s => html += `<li>${s.project} - ${new Date(s.scheduled_time).toLocaleString()}</li>`);
+                    html += `</ul>`;
+                }
+                if (data.errors && data.errors.length > 0) {
+                    html += `<div class="text-red-300 mt-2 border-t border-white/20 pt-2">Skipped / Errors:</div><ul class="list-disc pl-4 text-red-200">`;
+                    data.errors.forEach(e => html += `<li>${e}</li>`);
+                    html += `</ul>`;
+                }
+                resDiv.innerHTML = html;
+                loadInspections(); // Refresh dashboard
+            } else {
+                resDiv.innerHTML = `<span class="text-red-400">Error: ${data.error || 'Failed'}</span>`;
+            }
+        } catch(e) {
+            resDiv.classList.remove('hidden');
+            resDiv.innerHTML = `<span class="text-red-400">Network Error: ${e.message}</span>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Generate AI Schedule';
+        }
+    }
+</script>
+{% endblock %}

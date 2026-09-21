@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DoSJE Monitoring System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Common Auth Utility
+        const Auth = {
+            getToken: () => localStorage.getItem('access_token'),
+            getRole: () => localStorage.getItem('role'),
+            getDivision: () => localStorage.getItem('division_id'),
+            getNgo: () => localStorage.getItem('ngo_id'),
+            
+            logout: async () => {
+                const token = Auth.getToken();
+                if (token) {
+                    try {
+                        await fetch('/api/auth/logout/', {
+                            method: 'POST',
+                            keepalive: true,
+                            headers: {
+                                'Authorization': `Bearer ${token}`
+                            }
+                        });
+                    } catch (e) {
+                        console.error("Logout API failed", e);
+                    }
+                }
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                localStorage.removeItem('role');
+                localStorage.removeItem('division_id');
+                localStorage.removeItem('ngo_id');
+                window.location.href = '/login/';
+            },
+            
+            requireRole: (expectedRole) => {
+                const token = Auth.getToken();
+                const role = Auth.getRole();
+                if (!token || !role) {
+                    window.location.href = '/login/';
+                    return false;
+                }
+                if (role !== expectedRole) {
+                    alert('Unauthorized: You do not have permission to view this dashboard.');
+                    Auth.logout();
+                    return false;
+                }
+                return true;
+            },
+            
+            getCookie: (name) => {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            },
+            fetchWithAuth: async (url, options = {}) => {
+                const token = Auth.getToken();
+                if (!options.headers) options.headers = {};
+                if (token) {
+                    options.headers['Authorization'] = `Bearer ${token}`;
+                }
+                const csrftoken = Auth.getCookie('csrftoken');
+                if (csrftoken) {
+                    options.headers['X-CSRFToken'] = csrftoken;
+                }
+                
+                let response = await fetch(url, options);
+                
+                // Extremely simple 401 interceptor - in production we'd attempt token refresh here
+                if (response.status === 401) {
+                    Auth.logout();
+                }
+                
+                return response;
+            }
+        };
+    </script>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-800">
+    {% block content %}
+    {% endblock %}
+</body>
+</html>

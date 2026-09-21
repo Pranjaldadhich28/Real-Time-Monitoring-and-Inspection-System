@@ -1,0 +1,1269 @@
+{% extends "base.html" %}
+
+{% block head %}
+<!-- Jitsi Meet API -->
+<script src="https://meet.jit.si/external_api.js"></script>
+<!-- Leaflet.js for Maps -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<script>
+    // Enforce role
+    Auth.requireRole('official');
+</script>
+
+<div class="flex h-screen bg-gray-100 overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
+        <div class="p-6 border-b border-slate-700">
+            <h1 class="text-2xl font-bold tracking-tight text-white">DoSJE</h1>
+            <p class="text-slate-400 text-sm mt-1">Official Dashboard</p>
+        </div>
+        
+        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+
+            <a href="#" onclick="showSection('dashboard')" class="nav-link block px-4 py-3 rounded bg-blue-600 text-white font-medium transition">📊 Dashboard Overview</a>
+            <a href="#" onclick="showSection('scheduling')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">🗓️ Schedule Inspection</a>
+            <a href="#" onclick="showSection('reports')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">📁 Reports Inbox</a>
+            <a href="#" onclick="showSection('complaints')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">🚨 NSS Reports</a>
+            <a href="#" onclick="showSection('duplicates')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">🔍 Potential Duplicates</a>
+            <a href="#" onclick="showSection('missed-calls')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">📞 Missed Calls</a>
+            <a href="#" onclick="showSection('staff')" class="nav-link block px-4 py-3 rounded text-slate-300 hover:bg-slate-800 hover:text-white transition">👥 Leaves & Swaps</a>
+
+        </nav>
+        
+        <div class="p-4 border-t border-slate-700">
+            <button onclick="Auth.logout()" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 text-slate-300 rounded hover:bg-red-600 hover:text-white transition">
+                Logout
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col h-screen overflow-hidden relative">
+        
+        <!-- Mobile Header -->
+        <header class="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center shadow-md">
+            <div class="font-bold text-xl">DoSJE Official</div>
+            <button onclick="Auth.logout()" class="text-sm bg-slate-800 px-3 py-1 rounded">Logout</button>
+        </header>
+
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 pb-24">
+
+            <!-- ===================== SECTION: DASHBOARD ===================== -->
+            <div id="sec-dashboard" class="content-section space-y-8">
+                <!-- Real-Time VC Status Panel -->
+                <div id="random-vc-status" class="hidden bg-slate-800 text-white shadow-lg p-6 rounded-xl border border-slate-700 mb-8 flex flex-col md:flex-row justify-between items-center gap-6">
+                    <div class="flex items-center gap-4">
+                        <div class="relative">
+                            <div class="w-12 h-12 bg-blue-500/20 rounded-full flex items-center justify-center">
+                                <span class="text-2xl">📹</span>
+                            </div>
+                            <span class="absolute top-0 right-0 flex h-3 w-3">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                            </span>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-lg text-white mb-1">Active Call Request</h3>
+                            <div id="random-vc-details" class="text-xs text-slate-300 space-y-1">
+                                <!-- JS details -->
+                            </div>
+                        </div>
+                    </div>
+                    <div id="random-vc-action" class="flex flex-col items-center">
+                        <!-- JS Action -->
+                    </div>
+                </div>
+
+                
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h2 class="text-3xl font-bold text-slate-800">Division Overview</h2>
+                        <p class="text-slate-500 mt-1">Live metrics and risk analysis for your division.</p>
+                    </div>
+                </div>
+
+                <!-- KPI Cards Row -->
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Total NGOs</p>
+                        <p class="text-2xl font-bold text-slate-800 mt-1" id="kpi-ngos">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Total Insp.</p>
+                        <p class="text-2xl font-bold text-slate-800 mt-1" id="kpi-total-insp">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Pending</p>
+                        <p class="text-2xl font-bold text-blue-600 mt-1" id="kpi-pending">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Completed</p>
+                        <p class="text-2xl font-bold text-green-600 mt-1" id="kpi-completed">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow border-b-4 border-red-500 flex flex-col justify-center items-center transform scale-105">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">High Risk</p>
+                        <p class="text-3xl font-black text-red-600 mt-1" id="kpi-high-risk">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Needs Review</p>
+                        <p class="text-2xl font-bold text-yellow-500 mt-1" id="kpi-review">-</p>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-center items-center">
+                        <p class="text-xs text-slate-500 uppercase font-bold text-center">Normal</p>
+                        <p class="text-2xl font-bold text-emerald-500 mt-1" id="kpi-normal">-</p>
+                    </div>
+                </div>
+
+                <!-- Charts & Alerts Row -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- Chart: Risk Level -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4">Risk Level Distribution</h3>
+                        <div class="relative h-48 w-full">
+                            <canvas id="chart-risk"></canvas>
+                        </div>
+                    </div>
+                    <!-- Chart: Inspection Status -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4">Inspection Status</h3>
+                        <div class="relative h-48 w-full flex justify-center">
+                            <canvas id="chart-status"></canvas>
+                        </div>
+                    </div>
+                    <!-- Feed: AI Alerts -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col">
+                        <h3 class="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                            <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                            Recent AI Alerts
+                        </h3>
+                        <div class="flex-1 overflow-y-auto max-h-48 pr-2 space-y-3" id="ai-alerts-feed">
+                            <div class="text-sm text-slate-400 text-center mt-8">Loading alerts...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live CCTV Grid & Top Risk Projects -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    
+                    <!-- Top Risk Projects -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4">Top Risk Projects</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="text-xs text-slate-500 uppercase border-b">
+                                    <tr>
+                                        <th class="py-2">Project</th>
+                                        <th class="py-2">NGO</th>
+                                        <th class="py-2 text-right">Score</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="top-risk-table">
+                                    <tr><td colspan="3" class="py-4 text-center text-slate-400">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- CCTV Monitoring -->
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 mb-4 flex items-center justify-between">
+                            Live CCTV Monitoring
+                            <span class="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-1 rounded" id="cctv-count">0 Active</span>
+                        </h3>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="cctv-grid">
+                            <div class="text-sm text-slate-400 col-span-full">Loading feeds...</div>
+                        </div>
+                    </div>
+
+                </div>
+                
+                <!-- Pending Inspections (VC) -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+                    <h3 class="font-bold text-slate-700 mb-4">Pending Inspections (Video Calls)</h3>
+                    <ul id="inspections-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <li class="text-slate-500 text-sm">Loading...</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ===================== SECTION: SCHEDULING ===================== -->
+            <div id="sec-scheduling" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl max-w-2xl">
+                    <h2 class="text-2xl font-bold mb-6 border-b pb-2">Schedule Inspection</h2>
+                    <form id="schedule-form" class="space-y-5">
+                        <div>
+                            <label class="block font-medium text-slate-700 mb-1">Project</label>
+                            <select id="schedule-project" class="w-full border-slate-300 rounded-lg shadow-sm" required>
+                                <option value="">Loading projects...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-medium text-slate-700 mb-1">Inspector (Optional)</label>
+                            <select id="schedule-inspector" class="w-full border-slate-300 rounded-lg shadow-sm">
+                                <option value="">Random Assignment</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-medium text-slate-700 mb-1">Scheduled Time</label>
+                            <input type="datetime-local" id="schedule-time" class="w-full border-slate-300 rounded-lg shadow-sm" required>
+                        </div>
+                        <button type="submit" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition shadow">Schedule Now</button>
+                    </form>
+                </div>
+                <div class="bg-gradient-to-r from-indigo-900 to-purple-900 text-white shadow p-6 rounded-xl max-w-2xl mt-8">
+                    <div class="flex items-start gap-4">
+                        <div class="p-3 bg-white/10 rounded-lg text-3xl">🤖</div>
+                        <div>
+                            <h3 class="text-xl font-bold mb-1">AI Auto-Scheduling</h3>
+                            <p class="text-sm text-indigo-200 mb-4">Let Gemini AI analyze risk factors and historical data to automatically schedule the highest priority inspections for you.</p>
+                            <button onclick="runAiScheduler()" class="bg-white text-indigo-900 font-bold py-2 px-6 rounded-lg shadow-sm hover:bg-indigo-50 transition flex items-center gap-2">
+                                <span>✨</span> Run AI Scheduler
+                            </button>
+                            <div id="scheduler-status" class="mt-4 text-sm font-medium hidden"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===================== SECTION: REPORTS ===================== -->
+            <div id="sec-reports" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl">
+                    <div class="flex justify-between items-center border-b pb-4 mb-6">
+                        <h2 class="text-2xl font-bold">Reports Inbox</h2>
+                        <button onclick="verifySystemIntegrity()" class="bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow hover:bg-slate-900 transition flex items-center gap-2">
+                            🔗 Verify Blockchain
+                        </button>
+                    </div>
+                    <div id="integrity-badge" class="hidden text-center p-3 mb-6 rounded-lg font-bold border"></div>
+                    
+                    <ul id="reports-list" class="space-y-4">
+                        <li class="text-slate-500">Loading reports...</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ===================== SECTION: COMPLAINTS ===================== -->
+            <div id="sec-complaints" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl border-t-4 border-red-500">
+                    <h2 class="text-2xl font-bold mb-6 text-red-700">Complaints & Grievances</h2>
+                    <ul id="complaints-list" class="space-y-4 max-w-4xl">
+                        <li class="text-slate-500">Loading complaints...</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ===================== SECTION: DISBURSEMENTS ===================== -->
+            <div id="sec-disbursements" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl border-t-4 border-emerald-500">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-emerald-700">Project Fund Disbursements</h2>
+                        <select id="disb-project-filter" class="border border-slate-300 p-2 rounded-lg bg-slate-50 text-sm" onchange="loadDisbursements()">
+                            <option value="">Select a project...</option>
+                        </select>
+                    </div>
+                    
+                    <div id="disb-summary" class="hidden mb-6 p-4 rounded-xl border">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-xs text-slate-500 uppercase font-bold">Total Logged Disbursements</p>
+                                <p class="text-2xl font-bold text-emerald-700" id="disb-total-logged">₹ 0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-slate-500 uppercase font-bold">Fund Utilized Claimed</p>
+                                <p class="text-2xl font-bold text-blue-700" id="disb-total-claimed">₹ 0.00</p>
+                            </div>
+                        </div>
+                        <div id="disb-mismatch-alert" class="hidden mt-4 p-3 bg-red-100 border border-red-200 text-red-800 text-sm rounded flex items-center gap-2 font-bold">
+                            ⚠️ MISMATCH DETECTED: The total logged disbursements do not match the NGO's claimed utilization!
+                        </div>
+                        <div id="disb-match-alert" class="hidden mt-4 p-3 bg-emerald-100 border border-emerald-200 text-emerald-800 text-sm rounded flex items-center gap-2 font-bold">
+                            ✅ VERIFIED: Logged disbursements match the claimed utilization perfectly.
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100 border-b">
+                                    <th class="p-3 text-sm font-bold text-slate-600">Date</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Beneficiary</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">PAN Number</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Amount</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Ref Number</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Receipt</th>
+                                </tr>
+                            </thead>
+                            <tbody id="disbursements-list">
+                                <tr><td colspan="6" class="p-4 text-slate-500 text-center">Select a project to view disbursements.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===================== SECTION: DUPLICATES ===================== -->
+            <div id="sec-duplicates" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl border-t-4 border-yellow-500">
+                    <h2 class="text-2xl font-bold mb-6 text-yellow-700">⚠️ Potential Duplicate Beneficiaries — Human Review Needed</h2>
+                    <div id="duplicates-list" class="space-y-4">
+                        <div class="text-slate-500">Loading duplicates...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===================== SECTION: MISSED CALLS ===================== -->
+            <div id="sec-missed-calls" class="content-section hidden space-y-8">
+                <div class="bg-white shadow p-6 rounded-xl border-t-4 border-red-500">
+                    <h2 class="text-2xl font-bold mb-6 text-red-700">Missed Calls Log</h2>
+                    <p class="text-slate-600 text-sm mb-4">Shows all unanswered video calls. Repeatedly missed calls may indicate non-compliance or unavailability.</p>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100 border-b">
+                                    <th class="p-3 text-sm font-bold text-slate-600">Timestamp</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Event ID</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Inspector</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Project</th>
+                                    <th class="p-3 text-sm font-bold text-slate-600">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="missed-calls-list">
+                                <tr><td colspan="5" class="p-4 text-slate-500 text-center">Loading missed calls...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            
+
+            <!-- ===================== SECTION: STAFF (Leaves & Swaps & Activity) ===================== -->
+            <div id="sec-staff" class="content-section hidden space-y-8">
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Leave & Swap Requests -->
+                    <div class="bg-white shadow p-6 rounded-xl border-t-4 border-orange-500">
+                        <h2 class="text-2xl font-bold mb-6 text-orange-700">Leave & Swap Requests</h2>
+                        
+                        <h3 class="font-bold text-slate-700 mt-2 mb-3 bg-slate-50 p-2 rounded">Leave Applications</h3>
+                        <ul id="official-leave-list" class="space-y-3 mb-8">
+                            <li class="text-slate-500 text-sm">Loading leaves...</li>
+                        </ul>
+
+                        <h3 class="font-bold text-slate-700 mt-2 mb-3 bg-slate-50 p-2 rounded">Emergency Duty Swaps</h3>
+                        <ul id="official-swap-list" class="space-y-3">
+                            <li class="text-slate-500 text-sm">Loading swaps...</li>
+                        </ul>
+                    </div>
+
+                    <!-- Inspector Activity Log -->
+                    <div class="bg-white shadow p-6 rounded-xl border-t-4 border-blue-500">
+                        <h2 class="text-2xl font-bold mb-6 text-blue-700">Inspector Activity Log</h2>
+                        <div class="overflow-y-auto max-h-[600px]">
+                            <table class="w-full text-sm text-left text-slate-600">
+                                <thead class="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+                                    <tr>
+                                        <th scope="col" class="px-4 py-3">Inspector</th>
+                                        <th scope="col" class="px-4 py-3">Status</th>
+                                        <th scope="col" class="px-4 py-3 hidden sm:table-cell">Login Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inspector-activity-list" class="divide-y">
+                                    <tr><td colspan="3" class="px-4 py-4 text-center">Loading activity logs...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </main>
+</div>
+
+<!-- Modals (Jitsi, CCTV, Map) -->
+<div id="jitsi-modal" class="fixed inset-0 bg-black bg-opacity-80 hidden flex justify-center items-center z-[100]">
+    <div class="bg-white w-full max-w-5xl h-[85vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
+        <div class="flex justify-between items-center p-4 bg-slate-900 text-white">
+            <h3 class="font-bold">Inspection Video Call</h3>
+            <button onclick="closeJitsiModal()" class="bg-red-500 hover:bg-red-600 px-4 py-1 rounded font-bold transition">End Call</button>
+        </div>
+        <div id="jitsi-container" class="flex-grow bg-black"></div>
+    </div>
+</div>
+
+<div id="cctv-modal" class="fixed inset-0 bg-black bg-opacity-90 hidden flex justify-center items-center z-[100] p-4">
+    <div class="w-full max-w-4xl flex flex-col bg-slate-900 rounded-xl overflow-hidden shadow-2xl border border-slate-700">
+        <div class="flex justify-between items-center p-4 text-white border-b border-slate-700">
+            <h3 id="cctv-title" class="font-bold flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                Live Stream
+            </h3>
+            <button onclick="closeCctvModal()" class="text-slate-400 hover:text-white transition">✖ Close</button>
+        </div>
+        <div class="bg-black w-full aspect-video flex justify-center items-center overflow-hidden">
+            <img id="cctv-img" class="w-full h-full object-contain" alt="Live Camera Feed" />
+        </div>
+    </div>
+</div>
+
+<div id="map-modal" class="fixed inset-0 bg-black bg-opacity-80 hidden flex justify-center items-center z-[100] p-4">
+    <div class="bg-white w-full max-w-4xl h-[70vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
+        <div class="flex justify-between items-center p-4 bg-blue-700 text-white">
+            <h3 class="font-bold">Inspector GPS Location</h3>
+            <button onclick="closeMapModal()" class="text-blue-200 hover:text-white transition">✖ Close</button>
+        </div>
+        <div id="map-container" class="flex-grow w-full h-full relative z-0"></div>
+    </div>
+</div>
+
+<script>
+    let projectsData = [];
+    let inspectionsData = [];
+    let jitsiApi = null;
+    let chartRiskInstance = null;
+    let chartStatusInstance = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadAllData();
+        document.getElementById('schedule-form').addEventListener('submit', scheduleInspection);
+        
+        setInterval(loadAllData, 30000);
+    });
+
+    function showSection(sectionId) {
+        document.querySelectorAll('.content-section').forEach(el => el.classList.add('hidden'));
+        document.getElementById('sec-' + sectionId).classList.remove('hidden');
+        
+        document.querySelectorAll('.nav-link').forEach(el => {
+            el.classList.remove('bg-blue-600', 'text-white');
+            el.classList.add('text-slate-300', 'hover:bg-slate-800');
+        });
+        const activeLink = document.querySelector(`a[onclick="showSection('${sectionId}')"]`);
+        if(activeLink) {
+            activeLink.classList.remove('text-slate-300', 'hover:bg-slate-800');
+            activeLink.classList.add('bg-blue-600', 'text-white');
+        }
+    }
+
+    async function loadAllData() {
+        await loadProjectsAndKPIs();
+        
+        await Promise.all([
+            loadInspections(),
+            loadAnomalies(),
+            loadReports(),
+            loadComplaints(),
+            loadInspectorActivity(),
+            loadLeavesAndSwaps(),
+            loadMissedCalls(),
+            loadDisbursements(),
+            loadDuplicates()
+        ]);
+        renderCharts();
+    }
+
+    // Formatter
+    function timeAgo(dateString) {
+        const date = new Date(dateString);
+        const seconds = Math.floor((new Date() - date) / 1000);
+        let interval = seconds / 3600;
+        if (interval > 24) return Math.floor(interval/24) + "d ago";
+        if (interval >= 1) return Math.floor(interval) + "h ago";
+        interval = seconds / 60;
+        if (interval >= 1) return Math.floor(interval) + "m ago";
+        return Math.floor(seconds) + "s ago";
+    }
+
+    async function loadProjectsAndKPIs() {
+        try {
+            const [ngoRes, projRes, inspUserRes] = await Promise.all([
+                Auth.fetchWithAuth('/api/ngos/'),
+                Auth.fetchWithAuth('/api/projects/'),
+                Auth.fetchWithAuth('/api/users/?role=inspector')
+            ]);
+            
+            const ngos = await ngoRes.json();
+            projectsData = await projRes.json();
+            const inspectors = await inspUserRes.json();
+
+            // Populate Dropdowns
+            const projSelect = document.getElementById('schedule-project');
+            if(projSelect.options.length <= 1) {
+                projSelect.innerHTML = '<option value="">Select a project...</option>';
+                projectsData.forEach(p => projSelect.innerHTML += `<option value="${p.id}">${p.title}</option>`);
+            }
+            const inspSelect = document.getElementById('schedule-inspector');
+            if(inspSelect.options.length <= 1) {
+                inspSelect.innerHTML = '<option value="">Random Assignment</option>';
+                inspectors.forEach(i => inspSelect.innerHTML += `<option value="${i.id}">${i.username}</option>`);
+            }
+
+            // KPIs
+            document.getElementById('kpi-ngos').textContent = ngos.length;
+            
+            let highCount = 0, reviewCount = 0, normalCount = 0;
+            const topRiskList = [...projectsData].sort((a,b) => b.risk_score - a.risk_score);
+
+            topRiskList.forEach(p => {
+                if (p.risk_status === 'High Risk') highCount++;
+                else if (p.risk_status === 'Needs Review') reviewCount++;
+                else normalCount++;
+            });
+
+            document.getElementById('kpi-high-risk').textContent = highCount;
+            document.getElementById('kpi-review').textContent = reviewCount;
+            document.getElementById('kpi-normal').textContent = normalCount;
+
+            // Top Risk Table
+            const tbody = document.getElementById('top-risk-table');
+            tbody.innerHTML = '';
+            topRiskList.slice(0,5).forEach(p => {
+                let badgeClass = 'bg-emerald-100 text-emerald-800';
+                if (p.risk_status === 'High Risk') badgeClass = 'bg-red-100 text-red-800';
+                else if (p.risk_status === 'Needs Review') badgeClass = 'bg-yellow-100 text-yellow-800';
+                
+                tbody.innerHTML += `
+                    <tr class="border-b last:border-0 hover:bg-slate-50 transition">
+                        <td class="py-3 pr-2 font-medium truncate max-w-[150px]">${p.title}</td>
+                        <td class="py-3 px-2 text-slate-500 truncate max-w-[100px]">NGO #${p.ngo}</td>
+                        <td class="py-3 pl-2 text-right">
+                            <div class="flex items-center justify-end gap-2">
+                                <span class="font-bold mr-2">${p.risk_score}</span>
+                                <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded ${badgeClass}">${p.risk_status}</span>
+                                <button onclick="startDirectCall(${p.ngo})" class="ml-2 text-xs font-bold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 transition shadow-sm flex items-center gap-1">📞 Call NGO</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            // CCTV Grid
+            const cctvGrid = document.getElementById('cctv-grid');
+            cctvGrid.innerHTML = '';
+            let activeCctv = 0;
+            
+            projectsData.forEach(p => {
+                if(p.cameras) {
+                    p.cameras.forEach(c => {
+                        if(c.is_working) {
+                            activeCctv++;
+                            cctvGrid.innerHTML += `
+                                <div onclick="openCctvModal('${c.stream_url}', '${c.name.replace(/'/g, "\\'")}')" 
+                                     class="relative group cursor-pointer rounded-lg overflow-hidden border border-slate-200 bg-slate-800 aspect-video flex items-center justify-center shadow-sm">
+                                    <div class="absolute inset-0 bg-slate-900 opacity-50 group-hover:opacity-30 transition"></div>
+                                    <span class="text-white text-xs z-10 p-2 text-center font-medium">${c.name}</span>
+                                    <div class="absolute top-2 right-2 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded backdrop-blur">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                                        <span class="text-[9px] text-white font-bold tracking-widest uppercase">Live</span>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    });
+                }
+            });
+            document.getElementById('cctv-count').textContent = `${activeCctv} Active`;
+            if(activeCctv === 0) cctvGrid.innerHTML = '<div class="text-sm text-slate-400 col-span-full">No active cameras.</div>';
+
+        } catch (e) {}
+    }
+
+    async function loadAnomalies() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/anomalies/');
+            const anomalies = await res.json();
+            const feed = document.getElementById('ai-alerts-feed');
+            feed.innerHTML = '';
+            
+            if(anomalies.length === 0) {
+                feed.innerHTML = '<div class="text-sm text-slate-400 text-center mt-8">No recent alerts.</div>';
+                return;
+            }
+
+            anomalies.slice(0,10).forEach(a => {
+                const color = a.severity === 'high' ? 'text-red-600 bg-red-50 border-red-200' : 
+                             (a.severity === 'medium' ? 'text-orange-600 bg-orange-50 border-orange-200' : 'text-blue-600 bg-blue-50 border-blue-200');
+                
+                feed.innerHTML += `
+                    <div class="p-3 rounded-lg border ${color} text-sm">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="font-bold uppercase text-[10px] tracking-wider">${a.type.replace('_', ' ')}</span>
+                            <span class="text-[10px] opacity-70 font-medium">${timeAgo(a.flagged_at)}</span>
+                        </div>
+                        <p class="font-medium text-slate-800 mb-1 leading-snug">${a.description}</p>
+                        <p class="text-[10px] text-slate-500 truncate uppercase font-bold tracking-wider">${a.project_name} • ${a.ngo_name}</p>
+                    </div>
+                `;
+            });
+        } catch(e) {}
+    }
+
+    async function loadInspections() {
+        const res = await Auth.fetchWithAuth('/api/inspections/');
+        inspectionsData = await res.json();
+        
+        const kpiTotal = document.getElementById('kpi-total-insp');
+        if (kpiTotal) kpiTotal.textContent = inspectionsData.length;
+        
+        let pending = 0, completed = 0, in_progress = 0;
+        const list = document.getElementById('inspections-list');
+        list.innerHTML = '';
+        
+        const now = new Date();
+        
+        inspectionsData.forEach(i => {
+            if(i.status === 'completed') completed++;
+            else if(i.status === 'in_progress') in_progress++;
+            else pending++;
+
+            if(i.status !== 'completed') {
+                const schedTime = new Date(i.scheduled_time);
+                
+                const proj = projectsData.find(p => p.id === i.project);
+                const inspector = i.assignments && i.assignments.length > 0 ? i.assignments[0].inspector_name : 'Not Assigned';
+                
+                let statusBadge = `<span class="text-blue-600 font-bold capitalize">${i.status.replace('_', ' ')}</span>`;
+                if (i.status === 'in_progress') statusBadge = `<span class="text-emerald-600 font-bold">In Progress</span>`;
+                if (i.status === 'pending') statusBadge = `<span class="text-yellow-600 font-bold">Pending</span>`;
+                
+                const cctvAction = proj && proj.cctv_stream_url 
+                    ? `<button onclick="openCctvModal('${proj.cctv_stream_url}', '${proj.title}')" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block"></span>CCTV</button>` 
+                    : '';
+                    
+                const locationAction = `<button onclick="trackLocation(${i.id})" class="text-xs font-bold text-blue-600 hover:text-blue-800">📍 Track GPS</button>`;
+                
+                const vcAction = `<button onclick="joinCall(${i.id})" class="text-xs font-bold text-emerald-600 hover:text-emerald-800 border border-emerald-200 bg-emerald-50 px-2 py-1 rounded shadow-sm">📹 Video Call</button>`;
+                
+                list.innerHTML += `
+                    <li class="border border-slate-200 rounded-lg p-4 bg-slate-50 hover:bg-slate-100 transition flex flex-col justify-between">
+                        <div>
+                            <p class="font-bold text-slate-800 text-sm mb-1">${proj ? proj.title : 'Project'}</p>
+                            <p class="text-[11px] text-slate-500">Insp ID: #${i.id}</p>
+                            <p class="text-[11px] text-slate-700 font-bold bg-yellow-100 px-1 rounded inline-block">Inspector: ${inspector}</p>
+                            <p class="text-[11px] text-slate-500">Time: ${schedTime.toLocaleString()}</p>
+                            <p class="text-[11px] text-slate-500 mb-3 mt-1">Status: ${statusBadge}</p>
+                        </div>
+                        <div class="flex flex-wrap gap-3 mt-auto border-t border-slate-200 pt-3 items-center">
+                            ${vcAction}
+                            ${locationAction}
+                            ${cctvAction}
+                        </div>
+                    </li>
+                `;
+            }
+        });
+        
+        if (list.innerHTML === '') {
+            list.innerHTML = '<li class="text-slate-400 text-sm p-4 text-center w-full col-span-full">No active inspections.</li>';
+        }
+        
+        const kpiPend = document.getElementById('kpi-pending');
+        const kpiComp = document.getElementById('kpi-completed');
+        const kpiAct = document.getElementById('kpi-active'); 
+        
+        if (kpiPend) kpiPend.textContent = pending;
+        if (kpiComp) kpiComp.textContent = completed;
+        if (kpiAct) kpiAct.textContent = in_progress;
+        
+        if (typeof pollVerificationStatus === 'function') {
+            pollVerificationStatus();
+        }
+    }
+
+    function renderCharts() {
+        const pending = parseInt(document.getElementById('kpi-pending').textContent) || 0;
+        const completed = parseInt(document.getElementById('kpi-completed').textContent) || 0;
+        
+        const ctxStatus = document.getElementById('chart-status').getContext('2d');
+        if(chartStatusInstance) chartStatusInstance.destroy();
+        chartStatusInstance = new Chart(ctxStatus, {
+            type: 'doughnut',
+            data: {
+                labels: ['Pending/WIP', 'Completed'],
+                datasets: [{
+                    data: [pending, completed],
+                    backgroundColor: ['#3b82f6', '#10b981'],
+                    borderWidth: 0,
+                    hoverOffset: 4
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: {font: {family: "'Inter', sans-serif"}} } }, cutout: '70%' }
+        });
+
+        const high = parseInt(document.getElementById('kpi-high-risk').textContent) || 0;
+        const review = parseInt(document.getElementById('kpi-review').textContent) || 0;
+        const normal = parseInt(document.getElementById('kpi-normal').textContent) || 0;
+
+        const ctxRisk = document.getElementById('chart-risk').getContext('2d');
+        if(chartRiskInstance) chartRiskInstance.destroy();
+        chartRiskInstance = new Chart(ctxRisk, {
+            type: 'bar',
+            data: {
+                labels: ['Normal', 'Review', 'High'],
+                datasets: [{
+                    data: [normal, review, high],
+                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                    borderRadius: 4,
+                    barThickness: 30
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { 
+                    y: { beginAtZero: true, grid: { display: true, color: '#f1f5f9' }, border: {display: false}, ticks: { precision: 0, font: {family: "'Inter', sans-serif"} } }, 
+                    x: { grid: { display: false }, border: {display: false}, ticks: {font: {family: "'Inter', sans-serif"}} } 
+                }
+            }
+        });
+    }
+
+    async function scheduleInspection(e) {
+        e.preventDefault();
+        const project_id = document.getElementById('schedule-project').value;
+        const inspector_id = document.getElementById('schedule-inspector').value;
+        const scheduled_time = document.getElementById('schedule-time').value;
+
+        const payload = { project: project_id, scheduled_time: new Date(scheduled_time).toISOString() };
+        if (inspector_id) payload.inspector_id = inspector_id;
+
+        try {
+            const res = await Auth.fetchWithAuth('/api/inspections/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if(res.ok) {
+                alert('Inspection scheduled successfully!');
+                document.getElementById('schedule-form').reset();
+                loadInspections();
+            } else {
+                alert('Error scheduling.');
+            }
+        } catch(e) {}
+    }
+
+
+
+    function openJitsiModal(roomName) {
+        document.getElementById('jitsi-modal').classList.remove('hidden');
+        const container = document.getElementById('jitsi-container');
+        container.innerHTML = ''; 
+        jitsiApi = new JitsiMeetExternalAPI('meet.jit.si', {
+            roomName: roomName, width: '100%', height: '100%', parentNode: container,
+            userInfo: { displayName: 'Official' }
+        });
+        jitsiApi.addEventListener('videoConferenceLeft', closeJitsiModal);
+    }
+    function closeJitsiModal() {
+        document.getElementById('jitsi-modal').classList.add('hidden');
+        if (jitsiApi) { jitsiApi.dispose(); jitsiApi = null; }
+    }
+
+    function openCctvModal(streamUrl, title) {
+        document.getElementById('cctv-modal').classList.remove('hidden');
+        document.getElementById('cctv-title').innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> ${title}`;
+        // DEMO OVERRIDE: Force CCTV feed to the requested IP Webcam URL
+        // Added /video as it is required for IP Webcam app MJPEG stream to render inside an <img> tag.
+        document.getElementById('cctv-img').src = "http://10.250.169.6:8080/video";
+    }
+    function closeCctvModal() {
+        document.getElementById('cctv-modal').classList.add('hidden');
+        document.getElementById('cctv-img').src = '';
+    }
+
+    function openMapModal(lat, lng) {
+        document.getElementById('map-modal').classList.remove('hidden');
+        if (!window.mapInstance) {
+            window.mapInstance = L.map('map-container').setView([lat, lng], 15);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}').addTo(window.mapInstance);
+        } else {
+            window.mapInstance.setView([lat, lng], 15);
+            window.mapInstance.eachLayer((l) => { if (l instanceof L.Marker) window.mapInstance.removeLayer(l); });
+        }
+        L.marker([lat, lng]).addTo(window.mapInstance).bindPopup("<b>Evidence Location</b>").openPopup();
+        setTimeout(() => window.mapInstance.invalidateSize(), 100);
+    }
+    function closeMapModal() { document.getElementById('map-modal').classList.add('hidden'); }
+
+    async function loadReports() {
+        const res = await Auth.fetchWithAuth('/api/reports/');
+        const reports = await res.json();
+        const list = document.getElementById('reports-list');
+        list.innerHTML = '';
+        if(reports.length === 0) return list.innerHTML = '<li class="text-slate-500">No reports.</li>';
+
+        reports.forEach(r => {
+            const badges = r.anomaly_set.map(a => `<span class="bg-red-100 text-red-800 text-xs font-bold px-2 py-1 rounded">⚠️ ${a.type}</span>`).join(' ');
+            const status = r.status === 'finalized' ? `<span class="bg-blue-100 text-blue-800 text-[10px] uppercase font-bold px-2 py-1 rounded">Finalized</span>` : `<span class="bg-slate-200 text-slate-600 text-[10px] uppercase font-bold px-2 py-1 rounded">Draft</span>`;
+            
+            const ev = r.evidence_set?.find(e => e.geo_lat && e.geo_lng);
+            const mapBtn = ev ? `<button onclick="openMapModal(${ev.geo_lat}, ${ev.geo_lng})" class="mt-3 text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-200 hover:bg-indigo-100 font-medium transition shadow-sm">📍 View GPS</button>` : '';
+
+            let details = '';
+            if(r.status === 'finalized') {
+                details = `
+                <div class="mt-3 text-sm grid grid-cols-2 gap-4 bg-slate-50 border border-slate-100 p-3 rounded-lg">
+                    <div><span class="text-slate-500 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Beneficiaries</span><span class="font-medium">${r.beneficiaries_verified_count}/${r.beneficiaries_claimed_count}</span></div>
+                    <div><span class="text-slate-500 block text-[10px] uppercase font-bold tracking-wider mb-0.5">Funds Verified</span><span class="font-medium">₹${r.fund_utilized_verified||'0'}</span></div>
+                </div>`;
+            }
+
+            const timeStr = r.submitted_at ? new Date(r.submitted_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Time unknown';
+            const firstFileEv = r.evidence_set?.find(e => e.file);
+            const imgHtml = firstFileEv ? `<div class="mt-3"><a href="${firstFileEv.file}" target="_blank"><img src="${firstFileEv.file}" class="w-full h-32 object-cover rounded-lg border border-slate-200 shadow-sm hover:opacity-90 transition" alt="Evidence Photo"/></a></div>` : '';
+
+            list.innerHTML += `
+                <li class="p-5 border border-slate-200 rounded-xl bg-white hover:border-blue-300 transition shadow-sm">
+                    <div class="flex justify-between items-start mb-1">
+                        <div class="font-bold text-slate-800">Report #${r.id} <span class="text-slate-400 font-normal">| Insp #${r.inspection}</span></div>
+                        ${status}
+                    </div>
+                    <div class="text-xs text-slate-400 mb-3 font-medium">Submitted: ${timeStr}</div>
+                    <div class="mb-3">${badges}</div>
+                    <p class="text-sm text-slate-600 italic leading-snug">"${r.findings || 'No findings.'}"</p>
+                    ${imgHtml}
+                    ${details}
+                    ${mapBtn}
+                </li>
+            `;
+        });
+    }
+
+    async function loadComplaints() {
+        const res = await Auth.fetchWithAuth('/api/complaints/');
+        const list = document.getElementById('complaints-list');
+        list.innerHTML = '';
+        const data = await res.json();
+        if(data.length===0) return list.innerHTML = '<li class="text-slate-500">No complaints.</li>';
+        
+        data.forEach(c => {
+            const col = c.status === 'resolved' ? 'green' : (c.status === 'investigating' ? 'yellow' : 'red');
+            list.innerHTML += `
+                <li class="p-5 border border-${col}-200 bg-${col}-50 rounded-xl shadow-sm">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="font-bold text-${col}-900">${c.subject}</div>
+                        <span class="bg-${col}-200 text-${col}-900 text-[10px] px-2 py-1 uppercase font-bold rounded tracking-wider">${c.status}</span>
+                    </div>
+                    <div class="text-xs text-${col}-700 mb-2 font-medium uppercase tracking-wider">${c.ngo_name}</div>
+                    <p class="text-sm text-slate-800 mt-3 bg-white p-4 rounded-lg shadow-sm border border-${col}-100">"${c.description}"</p>
+                </li>
+            `;
+        });
+    }
+
+    async function loadInspectorActivity() {
+        const res = await Auth.fetchWithAuth('/api/inspector-activity/');
+        const logs = await res.json();
+        const list = document.getElementById('inspector-activity-list');
+        list.innerHTML = '';
+        if(logs.length===0) return list.innerHTML = '<tr><td colspan="3" class="px-4 py-6 text-center text-slate-500">No activity logs found.</td></tr>';
+        
+        logs.slice(0, 15).forEach(l => {
+            let actualOnline = l.is_active;
+            if (actualOnline && (new Date() - new Date(l.login_time))/(3600000) > 12) actualOnline = false;
+            
+            const badge = actualOnline ? '<span class="bg-green-100 text-green-800 text-[10px] uppercase px-2 py-0.5 rounded font-bold tracking-wider">Online</span>' : '<span class="bg-slate-100 text-slate-500 text-[10px] uppercase px-2 py-0.5 rounded tracking-wider font-bold">Offline</span>';
+            list.innerHTML += `
+                <tr class="hover:bg-slate-50 transition">
+                    <td class="px-4 py-4 font-medium text-slate-800">${l.inspector_name || l.inspector_username}</td>
+                    <td class="px-4 py-4">${badge}</td>
+                    <td class="px-4 py-4 text-slate-500 hidden sm:table-cell text-xs">${new Date(l.login_time).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</td>
+                </tr>
+            `;
+        });
+    }
+
+    async function loadLeavesAndSwaps() {
+        const [lRes, sRes] = await Promise.all([Auth.fetchWithAuth('/api/leaves/'), Auth.fetchWithAuth('/api/duty-swaps/')]);
+        const leaves = await lRes.json(), swaps = await sRes.json();
+        
+        const lList = document.getElementById('official-leave-list'); lList.innerHTML='';
+        if(leaves.length===0) lList.innerHTML = '<li class="text-slate-500 text-sm">No leave requests.</li>';
+        leaves.forEach(l => {
+            const acts = l.status === 'pending' ? `<button onclick="Auth.fetchWithAuth('/api/leaves/${l.id}/', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}).then(loadLeavesAndSwaps)" class="text-[10px] uppercase tracking-wider font-bold bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition shadow-sm">Approve</button>` : '';
+            lList.innerHTML += `<li class="p-4 border border-slate-200 rounded-xl bg-white flex justify-between items-center hover:shadow-sm transition">
+                <div><div class="font-bold text-sm text-slate-800">${l.inspector_name||l.inspector_username}</div><div class="text-xs text-slate-500 mt-0.5 font-medium">${l.start_date} to ${l.end_date}</div></div>
+                <div class="flex items-center gap-3"><span class="text-[10px] px-2 py-1 rounded bg-slate-100 uppercase font-bold tracking-wider">${l.status}</span> ${acts}</div>
+            </li>`;
+        });
+
+        const sList = document.getElementById('official-swap-list'); sList.innerHTML='';
+        if(swaps.length===0) sList.innerHTML = '<li class="text-slate-500 text-sm">No swap requests.</li>';
+        swaps.forEach(s => {
+            const acts = s.status === 'pending' ? `<button onclick="Auth.fetchWithAuth('/api/duty-swaps/${s.id}/', {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'approved'})}).then(loadLeavesAndSwaps).then(loadInspections)" class="text-[10px] uppercase tracking-wider font-bold bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition shadow-sm">Approve</button>` : '';
+            sList.innerHTML += `<li class="p-4 border border-slate-200 rounded-xl bg-white hover:shadow-sm transition">
+                <div class="flex justify-between items-center mb-2"><span class="font-bold text-sm text-slate-800">Insp #${s.inspection}</span><span class="text-[10px] px-2 py-1 rounded bg-slate-100 uppercase font-bold tracking-wider">${s.status}</span></div>
+                <div class="text-xs text-slate-600 bg-slate-50 p-2 rounded border border-slate-100"><span class="line-through text-red-500">${s.original_inspector_name}</span> <span class="mx-1 opacity-50">➔</span> <span class="text-green-600 font-bold">${s.proposed_inspector_name}</span></div>
+                <div class="mt-3 text-right">${acts}</div>
+            </li>`;
+        });
+    }
+
+    async function loadMissedCalls() {
+        try {
+            const list = document.getElementById('missed-calls-list');
+            if(!list) return;
+            const res = await Auth.fetchWithAuth('/api/inspections/missed-calls/');
+            if(!res.ok) return;
+            const events = await res.json();
+            
+            list.innerHTML = '';
+            if (events.length === 0) {
+                list.innerHTML = '<tr><td colspan="5" class="p-4 text-slate-500 text-center">No missed calls recorded.</td></tr>';
+                return;
+            }
+            events.forEach(ev => {
+                list.innerHTML += `
+                    <tr class="border-b hover:bg-slate-50">
+                        <td class="p-3 text-sm">${new Date(ev.created_at).toLocaleString()}</td>
+                        <td class="p-3 text-sm font-mono text-slate-500">#${ev.id}</td>
+                        <td class="p-3 text-sm font-medium text-slate-900">${ev.inspector_name}</td>
+                        <td class="p-3 text-sm text-slate-600">${ev.project_name}</td>
+                        <td class="p-3 text-sm font-bold text-red-600 uppercase">Missed</td>
+                    </tr>
+                `;
+            });
+        } catch(e) {
+            console.error(e);
+        }
+    }
+    
+    let mapModal = null;
+    let currentMarker = null;
+
+    async function loadDisbursements() {
+        const projectId = document.getElementById('disb-project-filter').value;
+        const list = document.getElementById('disbursements-list');
+        const summary = document.getElementById('disb-summary');
+        
+        if(!projectId) {
+            list.innerHTML = '<tr><td colspan="6" class="p-4 text-slate-500 text-center">Select a project to view disbursements.</td></tr>';
+            summary.classList.add('hidden');
+            return;
+        }
+        
+        list.innerHTML = '<tr><td colspan="6" class="p-4 text-slate-500 text-center">Loading disbursements...</td></tr>';
+        
+        try {
+            const res = await Auth.fetchWithAuth(`/api/disbursements/?project=${projectId}`);
+            const data = await res.json();
+            
+            list.innerHTML = '';
+            
+            let totalDisbursed = 0;
+            
+            if(data.length === 0) {
+                list.innerHTML = '<tr><td colspan="6" class="p-4 text-slate-500 text-center">No disbursements logged yet.</td></tr>';
+            } else {
+                data.forEach(d => {
+                    totalDisbursed += parseFloat(d.amount);
+                    list.innerHTML += `
+                        <tr class="border-b hover:bg-slate-50">
+                            <td class="p-3 text-sm">${new Date(d.disbursed_date).toLocaleDateString()}</td>
+                            <td class="p-3 text-sm font-bold">${d.beneficiary_name}</td>
+                            <td class="p-3 text-sm text-slate-600">${d.beneficiary_pan}</td>
+                            <td class="p-3 text-sm font-bold text-emerald-600">₹${parseFloat(d.amount).toLocaleString('en-IN')}</td>
+                            <td class="p-3 text-sm text-slate-500">${d.transaction_reference_number}</td>
+                            <td class="p-3 text-sm">
+                                ${d.receipt ? `<a href="${d.receipt}" target="_blank" class="text-blue-600 hover:underline">View</a>` : '<span class="text-slate-300">-</span>'}
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+            
+            // Show summary
+            summary.classList.remove('hidden');
+            document.getElementById('disb-total-logged').textContent = '₹ ' + totalDisbursed.toLocaleString('en-IN');
+            
+            const proj = projectsData.find(p => p.id == projectId);
+            const claimed = proj ? parseFloat(proj.fund_utilized_claimed || 0) : 0;
+            document.getElementById('disb-total-claimed').textContent = '₹ ' + claimed.toLocaleString('en-IN');
+            
+            const mismatchAlert = document.getElementById('disb-mismatch-alert');
+            const matchAlert = document.getElementById('disb-match-alert');
+            
+            if (totalDisbursed !== claimed) {
+                mismatchAlert.classList.remove('hidden');
+                matchAlert.classList.add('hidden');
+            } else {
+                mismatchAlert.classList.add('hidden');
+                if(claimed > 0) matchAlert.classList.remove('hidden');
+                else matchAlert.classList.add('hidden');
+            }
+            
+        } catch(e) { console.error('Failed to load disbursements', e); }
+    }
+
+    async function loadDuplicates() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/beneficiaries/');
+            const data = await res.json();
+            const potentials = data.filter(b => b.duplicate_status === 'potential');
+            
+            const list = document.getElementById('duplicates-list');
+            list.innerHTML = '';
+            
+            if (potentials.length === 0) {
+                list.innerHTML = '<div class="text-slate-500">No potential duplicates detected at this time.</div>';
+                return;
+            }
+            
+            potentials.forEach(b => {
+                list.innerHTML += `
+                    <div class="p-4 border border-yellow-200 bg-yellow-50 rounded-xl shadow-sm">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-white p-3 rounded border border-slate-200">
+                                <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">New Entry</div>
+                                <div class="font-bold text-slate-800">${b.name}</div>
+                                <div class="text-xs text-slate-500">ID: ${b.unique_id}</div>
+                                <div class="text-xs text-slate-500">Project ID: ${b.project}</div>
+                            </div>
+                            <div class="bg-white p-3 rounded border border-slate-200">
+                                <div class="text-[10px] uppercase font-bold text-slate-400 mb-1">Potential Match (Original)</div>
+                                <div class="font-bold text-slate-800">${b.duplicate_of_name}</div>
+                                <div class="text-xs text-slate-500">ID: ${b.duplicate_of_unique_id}</div>
+                                <div class="text-xs text-slate-500">Project: ${b.duplicate_of_project}</div>
+                            </div>
+                        </div>
+                        <div class="mt-4 flex gap-3 justify-end">
+                            <button onclick="actionDuplicate(${b.id}, 'dismiss')" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm rounded transition shadow-sm">
+                                Dismiss (Not a Duplicate)
+                            </button>
+                            <button onclick="actionDuplicate(${b.id}, 'confirm')" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded transition shadow-sm">
+                                Confirm Duplicate
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    async function actionDuplicate(id, action) {
+        if (!confirm(`Are you sure you want to ${action} this potential duplicate?`)) return;
+        try {
+            const res = await Auth.fetchWithAuth(`/api/beneficiaries/${id}/${action}_duplicate/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            });
+            if (res.ok) {
+                alert(`Duplicate has been ${action}ed.`);
+                loadDuplicates();
+            } else {
+                alert(`Failed to ${action} duplicate.`);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Network error.");
+        }
+    }
+
+    async function runAiScheduler() {
+        const btn = document.querySelector('button[onclick="runAiScheduler()"]');
+        const resDiv = document.getElementById('scheduler-status');
+        
+        if(btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span>⚡</span> Analyzing and Scheduling...';
+        }
+        resDiv.classList.add('hidden');
+        resDiv.innerHTML = '';
+
+        try {
+            const res = await Auth.fetchWithAuth('/api/inspections/auto-schedule/', {
+                method: 'POST'
+            });
+            const data = await res.json();
+            
+            resDiv.classList.remove('hidden');
+            if (res.ok) {
+                let html = `<div class="text-emerald-700 font-bold mb-2">${data.message}</div>`;
+                if (data.scheduled && data.scheduled.length > 0) {
+                    html += `<ul class="list-disc pl-4 text-emerald-800 mb-2">`;
+                    data.scheduled.forEach(s => html += `<li>${s.project} - ${new Date(s.scheduled_time).toLocaleString()}</li>`);
+                    html += `</ul>`;
+                }
+                if (data.errors && data.errors.length > 0) {
+                    html += `<div class="text-orange-700 mt-2 border-t border-indigo-200 pt-2">Skipped / Errors:</div><ul class="list-disc pl-4 text-orange-800">`;
+                    data.errors.forEach(e => html += `<li>${e}</li>`);
+                    html += `</ul>`;
+                }
+                resDiv.innerHTML = html;
+                loadInspections(); // Refresh dashboard
+            } else {
+                resDiv.innerHTML = `<span class="text-red-500 font-bold">Error: ${data.error || 'Failed'}</span>`;
+            }
+        } catch(e) {
+            resDiv.classList.remove('hidden');
+            resDiv.innerHTML = `<span class="text-red-500 font-bold">Network Error: ${e.message}</span>`;
+        } finally {
+            if(btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<span>⚡</span> Run Auto-Schedule';
+            }
+        }
+    }
+
+    async function startDirectCall(ngoId) {
+        try {
+            const res = await Auth.fetchWithAuth('/api/direct-calls/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ngo: ngoId })
+            });
+            const data = await res.json();
+            if(res.ok) {
+                openJitsiModal(data.room_name);
+            } else { alert('Failed to start direct call.'); }
+        } catch(e) { alert('Network error starting call.'); }
+    }
+
+    async function joinCall(inspectionId) {
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/${inspectionId}/initiate-vc/`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (res.ok) {
+                alert('Call initiated! Ringing Inspector browser now...');
+                pollVerificationStatus();
+                // Scroll to top where the status div usually is
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                alert(data.error || 'Failed to initiate video call. Ensure the inspection is In Progress.');
+            }
+        } catch (e) {
+            alert('Network error while initiating call.');
+        }
+    }
+
+    function openJitsiModal(roomName) {
+        document.getElementById('jitsi-modal').classList.remove('hidden');
+        const container = document.getElementById('jitsi-container');
+        container.innerHTML = ''; 
+        jitsiApi = new JitsiMeetExternalAPI('meet.jit.si', {
+            roomName: roomName, width: '100%', height: '100%', parentNode: container,
+            userInfo: { displayName: 'Official' }
+        });
+        jitsiApi.addEventListener('videoConferenceLeft', closeJitsiModal);
+    }
+
+    function closeJitsiModal() {
+        document.getElementById('jitsi-modal').classList.add('hidden');
+        if (jitsiApi) { jitsiApi.dispose(); jitsiApi = null; }
+    }
+
+    async function pollVerificationStatus() {
+        if (currentPollingTimeout) clearTimeout(currentPollingTimeout);
+        try {
+            const res = await Auth.fetchWithAuth('/api/inspections/check-verification-status/');
+            const data = await res.json();
+            
+            const statusDiv = document.getElementById('random-vc-status');
+            if (!statusDiv) return;
+            
+            if (data.status === 'none') {
+                statusDiv.classList.add('hidden');
+            } else {
+                statusDiv.classList.remove('hidden');
+                document.getElementById('random-vc-details').innerHTML = `
+                    <p><strong>Insp ID:</strong> #${data.inspection.id}</p>
+                    <p><strong>Inspector:</strong> ${data.inspector_name}</p>
+                    <p><strong>Project:</strong> ${data.project_name}</p>
+                    <p><strong>Event Status:</strong> <span class="uppercase tracking-wider font-bold text-xs px-2 py-1 rounded ${getBadgeColor(data.status)}">${data.status}</span></p>
+                `;
+                
+                const actionDiv = document.getElementById('random-vc-action');
+                if (data.status === 'pending') {
+                    actionDiv.innerHTML = `<p class="text-xs text-slate-500 italic animate-pulse">Waiting for Inspector to respond (Attempt ${data.attempt_number})...</p>`;
+                    currentPollingTimeout = setTimeout(pollVerificationStatus, 3000);
+                } else if (data.status === 'in_progress') {
+                    actionDiv.innerHTML = `<button onclick="openJitsiModal('${data.jitsi_room_name}')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded shadow">Join VC Room</button>`;
+                    currentPollingTimeout = setTimeout(pollVerificationStatus, 10000);
+                } else if (data.status === 'no_response') {
+                    actionDiv.innerHTML = `
+                        <p class="text-xs text-red-500 font-bold mb-2">No Response from Inspector.</p>
+                        <button onclick="retryVerification(${data.event_id})" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-1 px-3 rounded shadow text-sm">Retry VC</button>
+                    `;
+                } else if (data.status === 'missed' || data.status === 'declined') {
+                    actionDiv.innerHTML = `<p class="text-xs text-red-600 font-bold">Verification Exception — Further Review Required.</p>`;
+                } else if (data.status === 'completed') {
+                    actionDiv.innerHTML = `<p class="text-xs text-emerald-600 font-bold">Verification Completed Successfully.</p>`;
+                }
+            }
+        } catch (e) {}
+    }
+
+    function getBadgeColor(status) {
+        if (status === 'pending') return 'bg-yellow-100 text-yellow-800';
+        if (status === 'in_progress') return 'bg-blue-100 text-blue-800';
+        if (status === 'completed') return 'bg-green-100 text-green-800';
+        if (status === 'no_response' || status === 'declined' || status === 'missed') return 'bg-red-100 text-red-800';
+        return 'bg-slate-100 text-slate-800';
+    }
+
+    async function retryVerification(eventId) {
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/${eventId}/retry-verification/`, { method: 'POST' });
+            if (res.ok) {
+                pollVerificationStatus();
+            }
+        } catch (e) {}
+    }
+
+    async function trackLocation(inspectionId) {
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/${inspectionId}/live-location/`);
+            if (res.ok) {
+                const data = await res.json();
+                openMapModal(data.lat, data.lng);
+                // Optionally update marker popup text
+                if (window.mapInstance) {
+                    window.mapInstance.eachLayer((l) => {
+                        if (l instanceof L.Marker) {
+                            l.bindPopup("<b>Inspector's Live Location</b>").openPopup();
+                        }
+                    });
+                }
+            } else {
+                alert("No live location data available for this inspector yet. Make sure they have allowed GPS tracking.");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error fetching location data.");
+        }
+    }
+
+    async function verifySystemIntegrity() {
+        const badge = document.getElementById('integrity-badge');
+        badge.classList.remove('hidden');
+        badge.className = 'text-center p-4 mb-6 rounded-xl font-bold border bg-slate-100 text-slate-800 shadow-inner';
+        badge.textContent = 'Verifying blockchain integrity...';
+        try {
+            const res = await Auth.fetchWithAuth('/api/reports/verify/');
+            const data = await res.json();
+            if (data.verified) {
+                badge.className = 'text-center p-4 mb-6 rounded-xl font-bold border bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm';
+                badge.textContent = '✓ Blockchain verified securely';
+            } else {
+                badge.className = 'text-center p-4 mb-6 rounded-xl font-bold border bg-red-50 text-red-700 border-red-200 shadow-sm';
+                badge.textContent = `✗ TAMPERING DETECTED AT BLOCK #${data.broken_at_index} (${data.reason})`;
+            }
+        } catch(e) {}
+    }
+</script>
+{% endblock %}

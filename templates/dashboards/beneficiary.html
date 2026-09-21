@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block content %}
+<script>
+    Auth.requireRole('beneficiary');
+</script>
+
+<div class="min-h-screen bg-slate-50 font-sans text-slate-800 flex flex-col">
+    <!-- Header -->
+    <header class="bg-slate-900 text-white flex justify-between items-center px-6 py-4 shadow-md sticky top-0 z-40">
+        <div class="flex items-center gap-4">
+            <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl shadow-inner text-slate-800">👤</div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight tracking-wide">Beneficiary Portal</h1>
+                <p class="text-[10px] text-slate-300 uppercase tracking-widest">Self-Service Dashboard</p>
+            </div>
+        </div>
+        <button onclick="Auth.logout()" class="text-sm bg-red-600 px-3 py-1 rounded hover:bg-red-700 transition">Logout</button>
+    </header>
+
+    <div class="flex-1 p-4 md:p-8 space-y-8 max-w-5xl mx-auto w-full">
+        <div class="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-6 md:p-10 shadow-lg text-white">
+            <h2 class="text-3xl font-bold mb-2">Welcome, <span id="ben-name"></span></h2>
+            <p class="text-slate-300 max-w-2xl text-sm leading-relaxed">
+                View your enrolled scheme details and track your benefits. If you face any issues, you can lodge a grievance directly to the department.
+            </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Project Details -->
+            <div class="bg-white p-6 rounded-xl shadow border border-slate-200 space-y-4">
+                <h3 class="font-bold text-xl mb-4 text-slate-800 flex items-center gap-2">📑 Enrolled Scheme Details</h3>
+                
+                <div class="bg-slate-50 p-4 rounded-lg border">
+                    <p class="text-xs text-slate-500 uppercase font-bold mb-1">Scheme Name</p>
+                    <p class="font-bold text-slate-800 text-lg" id="proj-title">-</p>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-slate-50 p-4 rounded-lg border">
+                        <p class="text-xs text-slate-500 uppercase font-bold mb-1">Implementing NGO</p>
+                        <p class="font-bold text-slate-800" id="proj-ngo">-</p>
+                    </div>
+                    <div class="bg-slate-50 p-4 rounded-lg border">
+                        <p class="text-xs text-slate-500 uppercase font-bold mb-1">Project Status</p>
+                        <p class="font-bold text-slate-800 capitalize" id="proj-status">-</p>
+                    </div>
+                </div>
+
+                <div class="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+                    <p class="text-xs text-emerald-600 uppercase font-bold mb-1">Allocated Fund (INR)</p>
+                    <p class="font-bold text-emerald-800 text-2xl" id="proj-fund">₹ 0.00</p>
+                </div>
+            </div>
+
+            <!-- Complaints Form & List -->
+            <div class="bg-white p-6 rounded-xl shadow border border-slate-200 flex flex-col max-h-[600px]">
+                <h3 class="font-bold text-xl mb-4 text-slate-800 flex items-center gap-2">📢 Lodge a Grievance</h3>
+                
+                <form id="complaint-form" class="space-y-3 mb-6 pb-6 border-b">
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-1">Subject</label>
+                        <input type="text" id="comp-subject" class="w-full border border-slate-300 p-2 rounded-lg bg-slate-50" placeholder="Brief subject..." required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-1">Description</label>
+                        <textarea id="comp-desc" rows="3" class="w-full border border-slate-300 p-2 rounded-lg bg-slate-50" placeholder="Detailed explanation..." required></textarea>
+                    </div>
+                    <button type="submit" id="submit-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg transition shadow">
+                        Submit Grievance
+                    </button>
+                    <div id="submit-msg" class="hidden text-sm text-center font-bold p-2 rounded mt-2"></div>
+                </form>
+
+                <h4 class="font-bold text-slate-700 mb-3">My Past Grievances</h4>
+                <div class="flex-1 overflow-y-auto pr-2 space-y-3" id="complaints-list">
+                    <div class="text-sm text-slate-500 text-center py-4">Loading your grievances...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        loadDashboardData();
+        document.getElementById('complaint-form').addEventListener('submit', submitComplaint);
+    });
+
+    async function loadDashboardData() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/beneficiary/me/');
+            if(res.ok) {
+                const data = await res.json();
+                
+                document.getElementById('ben-name').textContent = data.name;
+                document.getElementById('proj-title').textContent = data.project.title;
+                document.getElementById('proj-ngo').textContent = data.project.ngo_name;
+                document.getElementById('proj-status').textContent = data.project.status;
+                document.getElementById('proj-fund').textContent = "₹ " + Number(data.project.fund_allocated).toLocaleString('en-IN');
+                
+                const list = document.getElementById('complaints-list');
+                list.innerHTML = '';
+                if(data.complaints.length === 0) {
+                    list.innerHTML = '<div class="text-sm text-slate-500 text-center py-4">No grievances filed.</div>';
+                } else {
+                    data.complaints.forEach(c => {
+                        let statusClass = "bg-slate-100 text-slate-800";
+                        if(c.status === 'open') statusClass = "bg-red-100 text-red-800";
+                        if(c.status === 'investigating') statusClass = "bg-yellow-100 text-yellow-800";
+                        if(c.status === 'resolved') statusClass = "bg-emerald-100 text-emerald-800";
+                        
+                        list.innerHTML += `
+                            <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                                <div class="flex justify-between items-start mb-1">
+                                    <h5 class="font-bold text-slate-700 text-sm">${c.subject}</h5>
+                                    <span class="${statusClass} px-2 py-0.5 rounded text-[10px] font-bold uppercase">${c.status}</span>
+                                </div>
+                                <p class="text-xs text-slate-600 mb-2">${c.description}</p>
+                                <div class="text-[10px] text-slate-400 border-t pt-1">${new Date(c.created_at).toLocaleString()}</div>
+                            </div>
+                        `;
+                    });
+                }
+            } else {
+                Auth.logout();
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    async function submitComplaint(e) {
+        e.preventDefault();
+        
+        const subject = document.getElementById('comp-subject').value.trim();
+        const desc = document.getElementById('comp-desc').value.trim();
+        const msg = document.getElementById('submit-msg');
+        const btn = document.getElementById('submit-btn');
+
+        if(!subject || !desc) {
+            msg.textContent = 'Description cannot be empty.';
+            msg.className = 'text-sm text-center font-bold p-2 rounded mt-2 bg-red-100 text-red-800 block';
+            return;
+        }
+        
+        btn.disabled = true;
+        btn.textContent = 'Submitting...';
+        msg.classList.add('hidden');
+
+        try {
+            const res = await Auth.fetchWithAuth('/api/beneficiary/complaints/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ subject: subject, description: desc })
+            });
+            
+            if(res.ok) {
+                msg.textContent = 'Grievance submitted successfully.';
+                msg.className = 'text-sm text-center font-bold p-2 rounded mt-2 bg-emerald-100 text-emerald-800 block';
+                document.getElementById('complaint-form').reset();
+                loadDashboardData();
+            } else {
+                const err = await res.json();
+                msg.textContent = 'Error: ' + JSON.stringify(err);
+                msg.className = 'text-sm text-center font-bold p-2 rounded mt-2 bg-red-100 text-red-800 block';
+            }
+        } catch(error) {
+            msg.textContent = 'Network error.';
+            msg.className = 'text-sm text-center font-bold p-2 rounded mt-2 bg-red-100 text-red-800 block';
+        }
+        
+        btn.disabled = false;
+        btn.textContent = 'Submit Grievance';
+    }
+</script>
+{% endblock %}

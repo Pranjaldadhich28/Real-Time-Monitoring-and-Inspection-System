@@ -1,0 +1,1369 @@
+{% extends "base.html" %}
+
+{% block head %}
+<script src="https://meet.jit.si/external_api.js"></script>
+<script>
+    // --- OFFLINE SYNC LOGIC ---
+    let offlineDB;
+    let pendingOfflineFiles = [];
+    
+    const req = indexedDB.open('DosjeOfflineStore', 3);
+    req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('inspections_cache')) db.createObjectStore('inspections_cache', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath: 'id' });
+    };
+    req.onsuccess = (e) => { offlineDB = e.target.result; updateNetworkUI(); };
+
+    function updateNetworkUI() {
+        const isOnline = navigator.onLine;
+        const dot = document.getElementById('net-status-dot');
+        const txt = document.getElementById('net-status-text');
+        const syncBtn = document.getElementById('sync-now-btn');
+        if (!offlineDB) return;
+        const tx = offlineDB.transaction('outbox', 'readonly');
+        const countReq = tx.objectStore('outbox').count();
+        countReq.onsuccess = () => {
+            const count = countReq.result;
+            if (isOnline) {
+                if (count > 0) {
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-orange-500 animate-pulse';
+                    txt.textContent = `${count} Pending Sync`;
+                    syncBtn.classList.remove('hidden');
+                } else {
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
+                    txt.textContent = 'Online';
+                    syncBtn.classList.add('hidden');
+                }
+            } else {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+                txt.textContent = 'Offline';
+                if (count > 0) {
+                    txt.textContent = `Offline (${count} Pending)`;
+                    syncBtn.classList.remove('hidden');
+                } else {
+                    syncBtn.classList.add('hidden');
+                }
+            }
+        };
+    }
+
+    window.addEventListener('online', () => { updateNetworkUI(); manualSync(); });
+    window.addEventListener('offline', updateNetworkUI);
+
+    async function manualSync() {
+        if (!navigator.onLine || !offlineDB) return;
+        const tx = offlineDB.transaction('outbox', 'readonly');
+        const outbox = tx.objectStore('outbox');
+        const allReq = outbox.getAll();
+        allReq.onsuccess = async () => {
+            const reports = allReq.result;
+            for (let r of reports) {
+                try {
+                    // 1. Create Report if needed
+                    let repId = r.reportId;
+                    if (!repId || String(repId).startsWith('offline-')) {
+                        const createRes = await Auth.fetchWithAuth('/api/reports/', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ inspection: r.inspectionId, findings: "" })
+                        });
+                        const createData = await createRes.json();
+                        repId = createData.id;
+                    }
+
+                    // 2. Upload Files
+                    if (r.files && r.files.length > 0) {
+                        for (let fileObj of r.files) {
+                            const formData = new FormData();
+                            formData.append('report', repId);
+                            formData.append('file', fileObj.file, fileObj.file.name || 'upload.jpg');
+                            if (fileObj.lat) formData.append('geo_lat', fileObj.lat);
+                            if (fileObj.lng) formData.append('geo_lng', fileObj.lng);
+                            await Auth.fetchWithAuth(`/api/reports/${repId}/evidence/`, { method: 'POST', body: formData }, false);
+                        }
+                    }
+
+                    // 3. Finalize
+                    r.payload.client_submission_id = r.id;
+                    const finalRes = await Auth.fetchWithAuth(`/api/reports/${repId}/finalize/`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(r.payload)
+                    });
+
+                    if (finalRes.ok) {
+                        const dTx = offlineDB.transaction('outbox', 'readwrite');
+                        dTx.objectStore('outbox').delete(r.id);
+                        if (r.id === currentReportId) {
+                            document.getElementById('evidence-success').classList.remove('hidden');
+                            document.getElementById('btn-finalize-report').disabled = true;
+                            document.getElementById('btn-finalize-report').innerHTML = `✅ Report Synced Successfully`;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Manual sync failed for", r.id, e);
+                    const uTx = offlineDB.transaction('outbox', 'readwrite');
+                    r.retryCount = (r.retryCount || 0) + 1;
+                    uTx.objectStore('outbox').put(r);
+                }
+            }
+            updateNetworkUI();
+        };
+    }
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then(reg => console.log('SW registered!'));
+    }
+
+
+
+    
+    // --- ADVANCED SCHEME CONFIGURATION ---
+    const SCHEME_CHECKLISTS = {
+        'AVYAY': [
+            { category: 'Infrastructure', question: 'Are wheelchair ramps and accessible toilets available?' },
+            { category: 'Healthcare', question: 'Is the Mobile Medical Unit fully functional and staffed?' },
+            { category: 'General', question: 'Are recreation facilities well-maintained?' }
+        ],
+        'NAPDDR': [
+            { category: 'Rehabilitation', question: 'Are detox beds and rehab facilities sanitary and operational?' },
+            { category: 'Records', question: 'Are counseling session records accurately maintained?' },
+            { category: 'Staff', question: 'Is trained psychiatric/social work staff present?' }
+        ],
+        'SMILE': [
+            { category: 'Accommodation', question: 'Does the Garima Greh provide adequate, safe shelter?' },
+            { category: 'Training', question: 'Are skill training equipment operational and accessible?' }
+        ],
+        'ELDERLINE': [
+            { category: 'Operations', question: 'Are toll-free operators active and logging queries?' },
+            { category: 'Infrastructure', question: 'Are workstations and UPS backups fully operational?' }
+        ],
+        'SWAVALAMBAN': [
+            { category: 'Accessibility', question: 'Are all vocational tools accessible to PwDs?' },
+            { category: 'Safety', question: 'Are emergency exits and pathways unobstructed?' }
+        ],
+        'DDRS': [
+            { category: 'Education', question: 'Are special education kits available and used?' },
+            { category: 'Transport', question: 'Are transport vans for PwDs in working condition?' }
+        ],
+        'NATIONAL_TRUST': [
+            { category: 'Therapy', question: 'Are sensory integration kits available in good condition?' },
+            { category: 'Staff', question: 'Is a certified special educator or therapist on site?' }
+        ],
+        'VAYOSHRI': [
+            { category: 'Distribution', question: 'Are assistive devices distributed directly to identified seniors?' },
+            { category: 'Condition', question: 'Are hearing aids and spectacles of approved quality?' }
+        ],
+        'SAGE': [
+            { category: 'Awareness', question: 'Are promotional kiosks and banners displayed visibly?' },
+            { category: 'Operations', question: 'Are survey tablets functioning and used for registration?' }
+        ],
+        'PM_AJAY': [
+            { category: 'Hostel', question: 'Is the hostel capacity sufficient with adequate beds and ventilation?' },
+            { category: 'Infrastructure', question: 'Are solar panels and water purifiers functioning?' },
+            { category: 'Nutrition', question: 'Is the mess food quality adequate and menu adhered to?' }
+        ],
+        'OTHER': [
+            { category: 'General', question: 'Is the project operating as per guidelines?' },
+            { category: 'Finance', question: 'Are registers and accounts well maintained?' }
+        ]
+    };
+    
+    let currentScheme = 'OTHER';
+    let currentAssets = [];
+    let currentBeneficiaries = [];
+    
+// --- INCOMING CALL LOGIC ---
+    
+    async function pollIncomingCalls() {
+        if (incomingCallInspId) return; // currently ringing
+
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/vc-status/`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'pending' && !notifiedCalls.has(data.event_id)) {
+                    notifiedCalls.add(data.event_id);
+                    
+                    const insp = assignments.find(a => a.id === data.inspection_id) || {id: data.inspection_id};
+                    
+                    incomingCallInspId = data.inspection_id;
+                    incomingCallRoom = data.jitsi_room_name;
+                    currentEventId = data.event_id;
+                    
+                    const proj = projectsData[insp.project] || {title: 'Active Inspection'};
+                    document.getElementById('incoming-call-title').textContent = proj?.title || `Inspection #${insp.id}`;
+                    
+                    document.getElementById('incoming-call-modal').classList.remove('hidden');
+                    
+                    playRingtone();
+                    
+                    // Auto-dismiss after 20 seconds
+                    callTimeout = setTimeout(() => {
+                        autoMissCall();
+                    }, 20000);
+                }
+            }
+        } catch (e) {
+            console.error("Polling error", e);
+        }
+    }
+    
+    let currentEventId = null;
+    
+    function playRingtone() {
+        console.log("Ringing...");
+    }
+    
+    function stopRingtone() {
+        console.log("Stopped ringing.");
+    }
+
+    async function autoMissCall() {
+        stopRingtone();
+        document.getElementById('incoming-call-modal').classList.add('hidden');
+        incomingCallInspId = null;
+        incomingCallRoom = null;
+        // No explicit API call needed for miss, backend handles timeout on Official side polling
+    }
+        async function acceptCall() {
+        const eventId = currentEventId;
+        const roomName = incomingCallRoom;
+        
+        stopRingtone();
+        if (callTimeout) clearTimeout(callTimeout);
+        document.getElementById('incoming-call-modal').classList.add('hidden');
+        incomingCallInspId = null;
+        incomingCallRoom = null;
+        
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/${eventId}/respond-vc/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({response: 'accept'})
+            });
+            if (res.ok) {
+                document.getElementById('jitsi-modal').classList.remove('hidden');
+                const container = document.getElementById('jitsi-container');
+                container.innerHTML = ''; 
+        
+                jitsiApi = new JitsiMeetExternalAPI('meet.jit.si', {
+                    roomName: roomName,
+                    width: '100%', height: '100%', parentNode: container,
+                    configOverwrite: { startWithAudioMuted: true, startWithVideoMuted: true },
+                    userInfo: { displayName: 'Inspector' }
+                });
+                jitsiApi.addEventListener('videoConferenceLeft', async () => {
+                    await Auth.fetchWithAuth(`/api/inspections/${eventId}/end-vc/`, { method: 'POST' });
+                    closeJitsiModal();
+                });
+                jitsiApi.addEventListener('connectionFailed', () => {
+                    alert('Call connection failed. Please try again.');
+                    closeJitsiModal();
+                });
+            }
+        } catch (e) {}
+    }
+    
+    async function declineCall() {
+        const eventId = currentEventId;
+        stopRingtone();
+        if (callTimeout) clearTimeout(callTimeout);
+        document.getElementById('incoming-call-modal').classList.add('hidden');
+        incomingCallInspId = null;
+        incomingCallRoom = null;
+        
+        try {
+            await Auth.fetchWithAuth(`/api/inspections/${eventId}/respond-vc/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({response: 'decline'})
+            });
+        } catch (e) {}
+    }
+
+
+
+</script>
+{% endblock %}
+
+{% block content %}
+<script>
+
+
+    Auth.requireRole('inspector');
+</script>
+
+<div class="min-h-screen bg-slate-50 font-sans text-slate-800 flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-slate-900 text-white flex justify-between items-center px-6 py-4 shadow-md sticky top-0 z-40">
+        <div class="flex items-center gap-4">
+                <!-- Network Status -->
+                <div class="flex items-center gap-3 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
+                    <div id="net-status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span id="net-status-text" class="text-xs font-bold text-slate-700 uppercase tracking-wider">Online</span>
+                    <button id="sync-now-btn" onclick="manualSync()" class="hidden text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded shadow transition">Sync Now</button>
+                </div>
+            <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center text-xl shadow-inner">🏛️</div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight tracking-wide">DoSJE Inspector Portal</h1>
+                <p class="text-[10px] text-slate-300 uppercase tracking-widest">Inspection & Monitoring System</p>
+            </div>
+        </div>
+        <nav class="hidden md:flex gap-8 text-sm font-medium">
+            <a href="#" class="text-white border-b-2 border-blue-500 pb-1">Dashboard</a>
+            <a href="#sec-assignments" class="text-slate-400 hover:text-white transition">Assigned Inspections</a>
+            <a href="#sec-leave" class="text-slate-400 hover:text-white transition">Leave Management</a>
+            <a href="#sec-completed" class="text-slate-400 hover:text-white transition">Reports</a>
+        </nav>
+        <div class="flex items-center gap-3">
+            <div class="text-right hidden sm:block">
+                <div class="text-sm font-bold">Inspector Profile</div>
+                <div class="text-[10px] text-slate-400 uppercase tracking-widest">Active Session</div>
+            </div>
+            <button onclick="Auth.logout()" class="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-lg border border-slate-700 hover:bg-red-600 transition shadow" title="Logout">
+                🚪
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="flex-grow p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto w-full grid grid-cols-1 xl:grid-cols-12 gap-6 pb-24">
+        
+        <!-- LEFT COLUMN -->
+        <div class="xl:col-span-4 flex flex-col gap-6" id="sec-assignments">
+            
+            <!-- Pending Inspections -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col flex-grow min-h-[400px] max-h-[600px]">
+                <div class="p-4 border-b border-slate-100 bg-slate-50 rounded-t-xl flex justify-between items-center">
+                    <h2 class="font-bold text-slate-800 text-lg">Pending Inspections</h2>
+                    <span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-full" id="pending-count">0</span>
+                </div>
+                <div class="p-4 space-y-3 overflow-y-auto flex-grow" id="pending-inspections-list">
+                    <div class="text-center py-8 text-slate-400 text-sm">Loading assignments...</div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200" id="sec-leave">
+                <div class="p-4 border-b border-slate-100 bg-slate-50 rounded-t-xl">
+                    <h2 class="font-bold text-slate-800 text-lg">Quick Actions</h2>
+                </div>
+                <div class="p-5">
+                    <h3 class="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
+                        <span class="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600">🏖️</span> Apply for Emergency Leave
+                    </h3>
+                    <form id="leave-form" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-[10px] uppercase font-bold text-slate-500 mb-1">Start Date</label>
+                                <input type="date" id="leave-start" class="w-full text-sm border-slate-200 rounded p-2 focus:ring-blue-500 focus:border-blue-500" required>
+                            </div>
+                            <div>
+                                <label class="block text-[10px] uppercase font-bold text-slate-500 mb-1">End Date</label>
+                                <input type="date" id="leave-end" class="w-full text-sm border-slate-200 rounded p-2 focus:ring-blue-500 focus:border-blue-500" required>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] uppercase font-bold text-slate-500 mb-1">Reason</label>
+                            <input type="text" id="leave-reason" class="w-full text-sm border-slate-200 rounded p-2 focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., Medical Emergency" required>
+                        </div>
+                        <button type="submit" class="w-full bg-slate-800 text-white font-bold py-2.5 rounded-lg text-sm hover:bg-slate-700 transition shadow-sm">Submit Request</button>
+                    </form>
+                    
+                    <!-- Leave History (Small snippet) -->
+                    <div class="mt-4 pt-4 border-t border-slate-100">
+                        <h4 class="text-[10px] uppercase font-bold text-slate-500 mb-2">Recent Requests</h4>
+                        <ul id="leave-list" class="space-y-2 max-h-32 overflow-y-auto"></ul>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="xl:col-span-8 flex flex-col gap-6">
+            
+            <!-- Assigned Inspections - Call & Reporting Interface -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-[600px] h-full relative">
+                <div class="p-4 border-b border-emerald-100 bg-emerald-50 rounded-t-xl flex justify-between items-center">
+                    <h2 class="font-bold text-emerald-900 text-lg">Assigned Inspections - Call & Reporting Interface</h2>
+                </div>
+                
+                <!-- Empty State -->
+                <div id="no-inspection-selected" class="absolute inset-0 top-16 bg-white/90 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-b-xl">
+                    <div class="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-4xl mb-4 shadow-inner">👈</div>
+                    <h3 class="text-xl font-bold text-slate-800 mb-2">No Inspection Selected</h3>
+                    <p class="text-slate-500 max-w-sm text-center text-sm">Select a pending inspection from the left panel to launch the reporting interface and video consultation.</p>
+                </div>
+
+                <!-- Active View -->
+                <div id="active-inspection-panel" class="flex flex-col h-full opacity-0 pointer-events-none transition-opacity duration-300">
+                    
+                    <!-- Top Info Header -->
+                    <div class="p-6 flex gap-5 border-b border-slate-100 bg-white">
+                        <div class="w-20 h-20 bg-slate-50 rounded-xl flex items-center justify-center text-3xl border border-slate-200 shadow-inner shrink-0">📍</div>
+                        <div class="flex-grow">
+                            <h3 class="font-bold text-xl text-slate-800 leading-tight flex items-center gap-3">
+                                <span id="proj-title">Project Name</span>
+                                <span id="scheme-badge" class="bg-indigo-100 text-indigo-800 text-xs font-bold px-2.5 py-1 rounded-full border border-indigo-200 shadow-sm">SCHEME</span>
+                            </h3>
+                            <div class="flex flex-wrap gap-x-8 gap-y-3 mt-3 text-sm text-slate-600">
+                                <div><span class="font-bold text-slate-400 text-[10px] uppercase tracking-wider block mb-0.5">Location</span><span id="proj-location" class="font-medium text-slate-700">Remote Verification</span></div>
+                                <div><span class="font-bold text-slate-400 text-[10px] uppercase tracking-wider block mb-0.5">Scheduled Date</span><span id="sched-time" class="font-medium text-slate-700">Date</span></div>
+                                <div><span class="font-bold text-slate-400 text-[10px] uppercase tracking-wider block mb-0.5">Status</span><span class="text-emerald-600 font-bold flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Active</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons Row -->
+                    <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 border-b border-slate-100">
+                        <div class="flex flex-col">
+                            <button id="btn-join-call" onclick="joinCall()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 px-4 rounded-lg shadow disabled:opacity-50 transition flex justify-center items-center gap-2">
+                                🎥 Join Video Call Consultation
+                            </button>
+                            <p id="vc-status-text" class="text-[10px] text-center text-slate-500 mt-2 font-medium uppercase tracking-wider"></p>
+                        </div>
+                        <div class="flex flex-col">
+                            <button id="btn-gps-track" onclick="startGpsTracking()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 px-4 rounded-lg shadow disabled:opacity-50 transition flex justify-center items-center gap-2">
+                                📍 Start Live GPS Tracking
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Comprehensive Inspection Form Wizard -->
+                    <div class="p-6 overflow-y-auto flex-grow bg-slate-100/50 space-y-6 pb-20">
+                        
+                        <!-- Section: Scheme Checklist -->
+                        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                            <h3 class="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2"><span>📋</span> Scheme-Specific Dynamic Checklist</h3>
+                            <div id="purpose-checklist" class="space-y-3">
+                                <!-- Dynamic JS Injection -->
+                            </div>
+                        </div>
+
+                        <!-- Section: Assets & Funds -->
+                        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                            <h3 class="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2"><span>📦</span> Grant & Asset Verification</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                                            <th class="p-3">Asset / Infrastructure</th>
+                                            <th class="p-3 text-center">Approved Qty</th>
+                                            <th class="p-3">Found Qty (Actual)</th>
+                                            <th class="p-3">Condition / Remarks</th>
+                                        </tr>
+                                    </thead>
+                                    <tfoot class="border-t border-slate-200 bg-slate-50">
+                                        <tr>
+                                            <td class="p-3 font-bold text-slate-700 text-sm" colspan="2">Verified Fund Utilization (₹)</td>
+                                            <td class="p-3" colspan="2"><input type="number" id="input-funds" class="w-full p-2 border border-slate-300 rounded text-sm focus:ring-blue-500" placeholder="Enter amount verified on ground..."></td>
+                                        </tr>
+                                    </tfoot>
+                                    <tbody id="assets-tbody">
+                                        <!-- Dynamic JS Injection -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Section: Beneficiaries -->
+                        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-bold text-slate-800 text-lg flex items-center gap-2"><span>👥</span> Live Beneficiary Verification</h3>
+                                <button onclick="randomizeBeneficiaries()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow-sm text-sm transition flex items-center gap-2">
+                                    🎲 Randomize 3 Beneficiaries
+                                </button>
+                            </div>
+                            <div id="random-bens-container" class="space-y-4">
+                                <p class="text-sm text-slate-500 italic text-center py-4">Click the randomize button to select beneficiaries for live verification.</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Section: CCTV & Feedback -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                <h3 class="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2"><span>📹</span> CCTV Monitoring</h3>
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">CCTV Status</label>
+                                        <select id="cctv-status" class="w-full border-slate-300 rounded text-sm focus:ring-blue-500">
+                                            <option value="Online">🟢 Online / Functional</option>
+                                            <option value="Offline">🔴 Offline</option>
+                                            <option value="Not Installed">⚪ Not Installed</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Last Recording Timestamp (If Offline)</label>
+                                        <input type="datetime-local" id="cctv-time" class="w-full border-slate-300 rounded text-sm focus:ring-blue-500">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                <h3 class="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2"><span>⭐</span> Resident Feedback (1-5)</h3>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div><label class="block text-[10px] font-bold text-slate-500 uppercase">Food / Nutrition</label><input type="number" id="fb-food" min="1" max="5" class="w-full border-slate-300 rounded p-1.5 text-sm" placeholder="5"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 uppercase">Medical Support</label><input type="number" id="fb-med" min="1" max="5" class="w-full border-slate-300 rounded p-1.5 text-sm" placeholder="5"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 uppercase">Cleanliness</label><input type="number" id="fb-clean" min="1" max="5" class="w-full border-slate-300 rounded p-1.5 text-sm" placeholder="5"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-500 uppercase">Safety</label><input type="number" id="fb-safe" min="1" max="5" class="w-full border-slate-300 rounded p-1.5 text-sm" placeholder="5"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Section: Violations -->
+                        <div class="bg-red-50 p-5 rounded-xl border border-red-200 shadow-sm">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-bold text-red-900 text-lg flex items-center gap-2"><span>⚠️</span> Report Violations</h3>
+                                <button onclick="addViolation()" class="bg-white border border-red-200 text-red-700 hover:bg-red-100 font-bold py-1.5 px-3 rounded shadow-sm text-sm transition">
+                                    + Add Issue
+                                </button>
+                            </div>
+                            <div id="violations-list">
+                                <!-- Dynamic -->
+                            </div>
+                        </div>
+
+                        <!-- Section: Evidence & Finalize -->
+                        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                            <h3 class="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2"><span>📸</span> Evidence & Finalization</h3>
+                            
+                            <div class="bg-slate-50 border-2 border-dashed border-slate-300 rounded-lg p-6 text-center mb-4 relative hover:bg-slate-100 transition">
+                                <input type="file" id="evidence-file" multiple class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="uploadEvidence()">
+                                <div class="text-3xl mb-2">📸</div>
+                                <h4 class="font-bold text-slate-700 mb-1">Capture Geotagged Evidence</h4>
+                                <p class="text-xs text-slate-500">Supports JPG, PNG, MP4. Media will be automatically tagged with GPS coordinates if available.</p>
+                            </div>
+                            
+                            <div id="geo-warning" class="hidden bg-red-50 border border-red-200 text-red-800 p-3 text-xs rounded-lg mb-3 font-medium">⚠️ Location capture failed or denied. Evidence will be saved without GPS metadata!</div>
+                            <div id="geo-success" class="hidden bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 text-xs rounded-lg mb-3 font-medium flex items-center gap-2"><span>📍</span> Geotag captured successfully!</div>
+                            
+                            <ul id="evidence-list" class="flex flex-wrap gap-3 mb-6"></ul>
+                            
+                            <!-- QUALITATIVE FINDINGS -->
+                            <div class="mb-6">
+                                <label class="block text-sm font-bold text-slate-700 mb-2">Qualitative Findings / Remarks</label>
+                                <textarea id="input-findings" class="w-full p-3 border border-slate-300 rounded-lg text-sm focus:ring-blue-500 h-24" placeholder="Enter detailed observation notes here..."></textarea>
+                            </div>
+                            
+                            <div class="pt-6 border-t border-slate-200">
+                                <button onclick="finalizeReport()" class="w-full bg-slate-900 text-white font-bold py-5 rounded-xl shadow-lg hover:bg-black transition text-lg flex justify-center items-center gap-3">
+                                    ⛓️ Finalize & Submit to Blockchain Ledger
+                                </button>
+                                <p class="text-center text-[10px] uppercase font-bold text-slate-400 mt-3 tracking-widest">Action is irreversible. Data will be permanently hashed.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BOTTOM FULL WIDTH ROW: Completed -->
+        <div class="xl:col-span-12" id="sec-completed">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200">
+                <div class="p-5 border-b border-slate-100 bg-slate-50 rounded-t-xl">
+                    <h2 class="font-bold text-slate-800 text-lg">Overview of Completed Inspections</h2>
+                </div>
+                <div class="p-0">
+                    <ul id="completed-inspections-list" class="divide-y divide-slate-100">
+                        <li class="p-6 text-slate-400 text-sm text-center">Loading completed history...</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- Modals -->
+<div id="jitsi-modal" class="fixed inset-0 bg-black bg-opacity-90 hidden flex flex-col z-[100] p-4 md:p-8">
+    <div class="w-full max-w-6xl mx-auto flex-grow bg-slate-900 rounded-xl flex flex-col overflow-hidden shadow-2xl border border-slate-700">
+        <div class="flex justify-between items-center p-4 bg-slate-950 text-white border-b border-slate-800">
+            <h3 class="font-bold flex items-center gap-2"><span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span> Live Video Consultation</h3>
+            <button onclick="closeJitsiModal()" class="bg-red-600 hover:bg-red-700 px-5 py-1.5 rounded-lg font-bold text-sm transition">Leave Call</button>
+        </div>
+        <div id="jitsi-container" class="flex-grow bg-black"></div>
+    </div>
+</div>
+
+<div id="swap-modal" class="fixed inset-0 bg-black bg-opacity-70 hidden flex justify-center items-center z-[100] p-4 backdrop-blur-sm">
+    <div class="bg-white w-full max-w-md rounded-xl flex flex-col overflow-hidden shadow-2xl">
+        <div class="flex justify-between items-center p-5 bg-red-600 text-white">
+            <h3 class="font-bold text-lg">Emergency Duty Swap</h3>
+            <button onclick="closeSwapModal()" class="font-bold text-sm opacity-80 hover:opacity-100 transition">Cancel</button>
+        </div>
+        <div class="p-6 space-y-5 bg-slate-50">
+            <p class="text-sm text-slate-600">Select an available inspector to take over this inspection. Only inspectors with no active assignments are shown.</p>
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Available Partner</label>
+                <select id="swap-partner" class="w-full border-slate-300 p-2.5 rounded-lg shadow-sm bg-white focus:ring-blue-500"></select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Emergency Reason</label>
+                <textarea id="swap-reason" class="w-full border-slate-300 p-2.5 rounded-lg shadow-sm bg-white focus:ring-blue-500" rows="3" placeholder="e.g. Medical emergency"></textarea>
+            </div>
+            <button onclick="submitSwapRequest()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg shadow transition mt-2">Submit Request to Official</button>
+        </div>
+    </div>
+</div>
+
+<div id="incoming-call-modal" class="fixed inset-0 bg-slate-900/90 backdrop-blur-md hidden flex justify-center items-center z-[200]">
+    <div class="bg-white w-full max-w-sm rounded-2xl flex flex-col overflow-hidden shadow-2xl p-8 items-center text-center transform transition-transform scale-100">
+        <div class="relative w-32 h-32 mb-6">
+            <!-- Pulsing rings -->
+            <div class="absolute inset-0 bg-blue-500 rounded-full animate-ping opacity-20"></div>
+            <div class="absolute inset-2 bg-blue-500 rounded-full animate-ping opacity-40" style="animation-delay: 0.5s"></div>
+            <!-- Avatar center -->
+            <div class="absolute inset-4 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-full flex items-center justify-center text-4xl text-white shadow-lg border-4 border-white z-10">
+                📞
+            </div>
+        </div>
+        
+        <h3 class="font-bold text-slate-400 text-xs uppercase tracking-widest mb-1">Incoming Inspection Call</h3>
+        <h2 id="incoming-call-title" class="font-bold text-slate-800 text-xl leading-tight mb-2">Project Name</h2>
+        <p id="incoming-call-official" class="text-sm text-slate-500 mb-8">DoSJE Official</p>
+        
+        <div class="flex gap-4 w-full">
+            <button onclick="declineCall()" class="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl shadow transition flex flex-col items-center">
+                <span class="text-xl mb-1">📵</span> Decline
+            </button>
+            <button onclick="acceptCall()" class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-xl shadow transition flex flex-col items-center">
+                <span class="text-xl mb-1">📲</span> Join Call
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+
+
+    let assignments = [];
+    let projectsData = {};
+    let ngosData = {};
+    let beneficiariesData = {};
+    let currentInspection = null;
+    let currentReportId = null;
+    let jitsiApi = null;
+    let gpsInterval = null;
+    let watchId = null;
+    let currentCoords = null;
+    let swapInspectionId = null;
+
+    // Incoming Call System
+    let notifiedCalls = new Set();
+    let callTimeout = null;
+    let ringtoneInterval = null;
+    let audioCtx = null;
+    let knownAssignmentIds = null;
+    let incomingCallRoom = null;
+    let incomingCallInspId = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadData();
+        document.getElementById('leave-form').addEventListener('submit', submitLeave);
+        loadLeaves();
+        setInterval(pollIncomingCalls, 5000); // Poll for incoming calls
+        setInterval(loadData, 30000); // Auto-refresh data
+    });
+
+    async function loadData() {
+        try {
+            const [inspRes, projRes, ngoRes] = await Promise.all([
+                Auth.fetchWithAuth('/api/inspections/'),
+                Auth.fetchWithAuth('/api/projects/'),
+                Auth.fetchWithAuth('/api/ngos/')
+            ]);
+            
+            assignments = await inspRes.json();
+            if (!Array.isArray(assignments)) assignments = [];
+            const projectsArray = await projRes.json();
+            if (Array.isArray(projectsArray)) projectsArray.forEach(p => projectsData[p.id] = p);
+            const ngosArray = await ngoRes.json();
+            if (Array.isArray(ngosArray)) ngosArray.forEach(n => ngosData[n.id] = n);
+            
+            // Fetch beneficiaries for active projects
+            for (let a of assignments) {
+                if (a.status === 'pending' || a.status === 'in_progress') {
+                    if (!beneficiariesData[a.project]) {
+                        try {
+                            const res = await Auth.fetchWithAuth(`/api/projects/${a.project}/beneficiaries/`);
+                            if (res.ok) beneficiariesData[a.project] = await res.json();
+                        } catch (err) {}
+                    }
+                }
+            }
+            if (offlineDB) {
+                const tx = offlineDB.transaction('inspections_cache', 'readwrite');
+                tx.objectStore('inspections_cache').put({id: 'data', assignments, projectsData, ngosData, beneficiariesData});
+            }
+            renderPendingInspections();
+            renderCompletedInspections();
+        } catch (e) {
+            if (offlineDB) {
+                const tx = offlineDB.transaction('inspections_cache', 'readonly');
+                const req = tx.objectStore('inspections_cache').get('data');
+                req.onsuccess = () => {
+                    if (req.result) {
+                        assignments = req.result.assignments;
+                        projectsData = req.result.projectsData;
+                        ngosData = req.result.ngosData;
+                        beneficiariesData = req.result.beneficiariesData || {};
+                        renderPendingInspections();
+                        renderCompletedInspections();
+                    }
+                };
+            }
+        }
+    }
+
+
+    function renderPendingInspections() {
+        const list = document.getElementById('pending-inspections-list');
+        list.innerHTML = '';
+        
+        const pending = assignments.filter(a => a.status === 'pending' || a.status === 'in_progress');
+        document.getElementById('pending-count').textContent = pending.length;
+
+        if (pending.length === 0) {
+            list.innerHTML = '<div class="text-center py-8 text-slate-400 text-sm">No active assignments today.</div>';
+            return;
+        }
+
+        pending.forEach(a => {
+            const proj = projectsData[a.project];
+            const ngo = proj ? ngosData[proj.ngo] : null;
+            const d = new Date(a.scheduled_time);
+            
+            const isAccepted = a.assignments && a.assignments.length > 0 ? a.assignments.some(assign => assign.is_accepted) : false;
+            
+            let titleHtml = proj?.title || 'Project';
+            if (ngo) titleHtml += ` <span class="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 ml-1">NGO: ${ngo.name}</span>`;
+
+            let actionHtml = '';
+            if (!isAccepted) {
+                actionHtml = `
+                    <button onclick="acceptAssignment(${a.id})" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded shadow-sm transition w-full">
+                        I Accept Assignment
+                    </button>
+                `;
+            } else if (a.status === 'pending') {
+                actionHtml = `
+                    <button onclick="startInspection(${a.id})" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded shadow-sm transition">
+                        Start Inspection
+                    </button>
+                    <button onclick="openSwapModal(${a.id})" class="text-[10px] text-slate-400 hover:text-red-600 font-bold uppercase tracking-wider transition underline">
+                        Swap
+                    </button>
+                `;
+            } else if (a.status === 'in_progress') {
+                actionHtml = `
+                    <button onclick="openInspection(${a.id})" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded shadow-sm transition">
+                        Continue Inspection
+                    </button>
+                `;
+            }
+
+            list.innerHTML += `
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-3 hover:border-blue-400 transition cursor-default">
+                    <div>
+                        <h3 class="font-bold text-slate-800 leading-tight flex items-center flex-wrap gap-1">${titleHtml}</h3>
+                        <div class="text-[11px] text-slate-500 mt-1 flex items-center gap-3">
+                            <a href="https://www.google.com/maps/search/?api=1&query=${proj?.latitude},${proj?.longitude}" target="_blank" class="flex items-center gap-1 hover:text-blue-600 hover:underline transition" title="View on Maps">📍 View Location</a>
+                            <span class="flex items-center gap-1">📅 ${d.toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between mt-1">
+                        ${actionHtml}
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    function renderCompletedInspections() {
+        const list = document.getElementById('completed-inspections-list');
+        list.innerHTML = '';
+        
+        const completed = assignments.filter(a => a.status === 'completed');
+
+        if (completed.length === 0) {
+            list.innerHTML = '<li class="p-6 text-slate-400 text-sm text-center">No completed inspections yet.</li>';
+            return;
+        }
+
+        completed.forEach(a => {
+            const proj = projectsData[a.project];
+            const ngo = proj ? ngosData[proj.ngo] : null;
+            const d = new Date(a.scheduled_time);
+            
+            let titleHtml = proj?.title || 'Project';
+            if (ngo) titleHtml += ` <span class="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 ml-1">NGO: ${ngo.name}</span>`;
+
+            list.innerHTML += `
+                <li class="p-5 flex justify-between items-center hover:bg-slate-50 transition">
+                    <div class="flex items-center gap-4">
+                <!-- Network Status -->
+                <div class="flex items-center gap-3 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
+                    <div id="net-status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span id="net-status-text" class="text-xs font-bold text-slate-700 uppercase tracking-wider">Online</span>
+                    <button id="sync-now-btn" onclick="manualSync()" class="hidden text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded shadow transition">Sync Now</button>
+                </div>
+                        <div class="w-10 h-10 rounded bg-slate-100 flex items-center justify-center text-lg border border-slate-200">✅</div>
+                        <div>
+                            <h4 class="font-bold text-slate-800 text-sm flex items-center flex-wrap gap-1">${titleHtml}</h4>
+                            <p class="text-xs text-slate-500"><a href="https://www.google.com/maps/search/?api=1&query=${proj?.latitude},${proj?.longitude}" target="_blank" class="hover:text-blue-600 hover:underline transition">View Location</a> • ${d.toLocaleDateString()}</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-emerald-600 font-bold text-xs uppercase tracking-wider block">Status</span>
+                        <span class="text-slate-600 text-sm font-medium">Completed</span>
+                    </div>
+                </li>
+            `;
+        });
+    }
+
+    
+    
+
+    async function startInspection(id) {
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/${id}/start/`, { method: 'POST' });
+            if (res.ok) {
+                alert("Inspection Started! You are now eligible for Random Verification.");
+                await loadData();
+                openInspection(id);
+            } else {
+                alert("Failed to start inspection.");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error connecting to server.");
+        }
+    }
+
+    async function acceptAssignment(id) {
+        try {
+            const res = await Auth.fetchWithAuth(`/api/inspections/${id}/accept/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (res.ok) {
+                alert("Assignment accepted successfully!");
+                await loadData();
+                openInspection(id);
+            } else {
+                alert("Failed to accept assignment.");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error connecting to server.");
+        }
+    }
+
+
+    async function openInspection(id) {
+        currentInspection = assignments.find(a => a.id === id);
+        const proj = projectsData[currentInspection.project];
+        const ngo = proj ? ngosData[proj.ngo] : null;
+        
+        currentScheme = proj.scheme_name || 'OTHER';
+        
+        // Populate Header Data
+        let pTitle = proj.title;
+        if (ngo) pTitle += ` (NGO: ${ngo.name})`;
+        document.getElementById('proj-title').textContent = pTitle;
+        document.getElementById('sched-time').textContent = new Date(currentInspection.scheduled_time).toLocaleString();
+        document.getElementById('scheme-badge').textContent = currentScheme;
+        
+        // Hide empty state, show panel
+        const emptyState = document.getElementById('no-inspection-selected');
+        const activePanel = document.getElementById('active-inspection-panel');
+        
+        emptyState.classList.add('hidden');
+        activePanel.classList.remove('opacity-0', 'pointer-events-none');
+        activePanel.classList.add('opacity-100');
+        
+        
+        
+        // Render Checklists Based on Scheme
+        const pList = document.getElementById('purpose-checklist');
+        pList.innerHTML = '';
+        const schemeQuestions = SCHEME_CHECKLISTS[currentScheme] || SCHEME_CHECKLISTS['OTHER'];
+        schemeQuestions.forEach((q, idx) => {
+            pList.innerHTML += `
+                <label class="flex items-start gap-3 p-3 bg-white border border-slate-200 rounded-lg shadow-sm cursor-pointer hover:border-blue-400 transition">
+                    <input type="checkbox" class="purpose-cb w-5 h-5 mt-0.5 text-blue-600 focus:ring-blue-500 border-slate-300 rounded" data-category="${q.category}" data-question="${q.question}">
+                    <div class="leading-snug">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">${q.category}</span>
+                        <span class="text-slate-800">${q.question}</span>
+                    </div>
+                </label>
+            `;
+        });
+        
+        // Use pre-fetched data from cache
+        currentAssets = proj.assets || [];
+        renderAssetsTable();
+        document.getElementById('random-bens-container').innerHTML = '<p class="text-sm text-slate-500 italic text-center py-4">Click the randomize button to select beneficiaries for live verification.</p>';
+        
+        if (navigator.onLine) {
+            try {
+                const benRes = await Auth.fetchWithAuth(`/api/projects/${proj.id}/beneficiaries/`);
+                if (benRes.ok) {
+                    currentBeneficiaries = await benRes.json();
+                    beneficiariesData[proj.id] = currentBeneficiaries;
+                } else {
+                    currentBeneficiaries = beneficiariesData[proj.id] || [];
+                }
+            } catch (e) {
+                currentBeneficiaries = beneficiariesData[proj.id] || [];
+            }
+        } else {
+            currentBeneficiaries = beneficiariesData[proj.id] || [];
+        }
+
+        try {
+            const checkRes = await Auth.fetchWithAuth(`/api/reports/?inspection=${id}`);
+            let report;
+            if (checkRes.ok) {
+                const existing = await checkRes.json();
+                if (existing.length > 0) report = existing[0];
+            }
+            if (!report) {
+                const createRes = await Auth.fetchWithAuth('/api/reports/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ inspection: id, findings: "" })
+                });
+                report = await createRes.json();
+            }
+            currentReportId = report.id;
+        } catch (e) {
+            currentReportId = 'offline-' + id;
+        }
+        pendingOfflineFiles = [];
+        document.getElementById('evidence-list').innerHTML = '';
+        document.getElementById('geo-warning').classList.add('hidden');
+        document.getElementById('geo-success').classList.add('hidden');
+        document.getElementById('btn-finalize-report').disabled = false;
+        document.getElementById('btn-finalize-report').innerHTML = `s, Finalize & Secure on Blockchain`;
+
+    }
+    
+    function renderAssetsTable() {
+        const tbody = document.getElementById('assets-tbody');
+        tbody.innerHTML = '';
+        if(currentAssets.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-slate-500 text-sm">No assets registered for this project.</td></tr>';
+            return;
+        }
+        currentAssets.forEach((asset) => {
+            tbody.innerHTML += `
+                <tr class="border-b hover:bg-slate-50 asset-row" data-id="${asset.id}" data-approved="${asset.approved_quantity}">
+                    <td class="p-3 text-sm font-bold text-slate-800">${asset.asset_name}</td>
+                    <td class="p-3 text-sm text-center">${asset.approved_quantity}</td>
+                    <td class="p-3 text-sm"><input type="number" class="found-qty w-full p-2 border border-slate-300 rounded focus:ring-blue-500" placeholder="0" min="0" onchange="checkAssetDiscrepancy(this)"></td>
+                    <td class="p-3 text-sm"><input type="text" class="asset-condition w-full p-2 border border-slate-300 rounded focus:ring-blue-500" placeholder="e.g. Good, Broken"></td>
+                </tr>
+            `;
+        });
+    }
+    
+    function checkAssetDiscrepancy(input) {
+        const tr = input.closest('tr');
+        const approved = parseInt(tr.dataset.approved);
+        const found = parseInt(input.value) || 0;
+        if(found < approved) {
+            tr.classList.add('bg-red-50');
+            tr.classList.remove('hover:bg-slate-50');
+        } else {
+            tr.classList.remove('bg-red-50');
+            tr.classList.add('hover:bg-slate-50');
+        }
+    }
+    
+    function randomizeBeneficiaries() {
+        const container = document.getElementById('random-bens-container');
+        container.innerHTML = '';
+        if(currentBeneficiaries.length === 0) {
+            container.innerHTML = '<p class="text-sm text-slate-500 italic">No beneficiaries found for this project.</p>';
+            return;
+        }
+        
+        let shuffled = [...currentBeneficiaries].sort(() => 0.5 - Math.random());
+        let selected = shuffled.slice(0, 3);
+        
+        selected.forEach(b => {
+            container.innerHTML += `
+                <div class="ben-log-card bg-slate-50 p-4 border border-slate-200 rounded-lg shadow-sm" data-id="${b.id}">
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="font-bold text-slate-800">${b.name} <span class="text-xs font-normal text-slate-500 ml-2">(PAN: ${b.pan_number || 'N/A'})</span></h4>
+                        <button onclick="alert('Verification call simulation launched for ${b.name}')" class="text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold py-1 px-3 rounded shadow-sm">🎥 Verify</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mt-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Interaction Notes</label>
+                            <input type="text" class="ben-notes w-full p-2 border border-slate-300 rounded text-sm focus:ring-blue-500" placeholder="e.g. Identity verified.">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Score (1-10)</label>
+                            <input type="number" class="ben-score w-full p-2 border border-slate-300 rounded text-sm focus:ring-blue-500" min="1" max="10" placeholder="10">
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+    
+    function addViolation() {
+        const list = document.getElementById('violations-list');
+        const id = Date.now();
+        list.innerHTML += `
+            <div class="violation-card flex gap-3 p-3 bg-white border border-slate-200 rounded-lg shadow-sm mb-3" id="vio-${id}">
+                <select class="vio-severity border-slate-300 rounded focus:ring-red-500 text-sm font-bold bg-slate-50">
+                    <option value="minor">🟡 Minor</option>
+                    <option value="major">🟠 Major</option>
+                    <option value="critical">🔴 Critical</option>
+                </select>
+                <input type="text" class="vio-desc flex-grow border-slate-300 rounded text-sm focus:ring-red-500" placeholder="Describe the violation...">
+                <input type="date" class="vio-deadline border-slate-300 rounded text-sm focus:ring-red-500 text-slate-500">
+                <button onclick="document.getElementById('vio-${id}').remove()" class="text-red-500 hover:bg-red-50 p-2 rounded">🗑️</button>
+            </div>
+        `;
+    }
+            
+
+
+
+
+
+    function joinCall() {
+        if (!currentInspection) return;
+        
+        const assignment = currentInspection.assignments && currentInspection.assignments.length > 0 ? currentInspection.assignments[0] : null;
+        if (!assignment || !assignment.jitsi_room_name) {
+            alert("No Jitsi room is configured for this inspection.");
+            return;
+        }
+        
+        document.getElementById('jitsi-modal').classList.remove('hidden');
+        const container = document.getElementById('jitsi-container');
+        container.innerHTML = ''; 
+
+        jitsiApi = new JitsiMeetExternalAPI('meet.jit.si', {
+            roomName: assignment.jitsi_room_name,
+            width: '100%', height: '100%', parentNode: container,
+            configOverwrite: { startWithAudioMuted: true, startWithVideoMuted: true },
+            userInfo: { displayName: 'Inspector' }
+        });
+        jitsiApi.addEventListener('videoConferenceLeft', closeJitsiModal);
+    }
+
+    function closeJitsiModal() {
+        document.getElementById('jitsi-modal').classList.add('hidden');
+        if (jitsiApi) { jitsiApi.dispose(); jitsiApi = null; }
+    }
+
+    function startGpsTracking() {
+        if (!currentInspection) return;
+        if (confirm("Privacy Notice: Your location will be shared with your official during this inspection window only. Do you consent?")) {
+            if ("geolocation" in navigator) {
+                watchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const firstTime = (currentCoords === null);
+                        currentCoords = { lat: position.coords.latitude, lng: position.coords.longitude };
+                        if (firstTime) {
+                            sendGpsPing(); // Send immediately on first lock
+                        }
+                    },
+                    (error) => { alert("Could not read GPS location."); },
+                    { enableHighAccuracy: true }
+                );
+                gpsInterval = setInterval(sendGpsPing, 15000); // Poll more frequently (15s instead of 30s)
+                
+            } else { alert("Geolocation is not supported by your browser."); }
+        }
+    }
+
+    function stopGpsTracking() {
+        if (gpsInterval) { clearInterval(gpsInterval); gpsInterval = null; }
+        if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+        currentCoords = null;
+    }
+
+    async function sendGpsPing() {
+        if (!currentInspection || !currentCoords) return;
+        try {
+            await Auth.fetchWithAuth(`/api/inspections/${currentInspection.id}/location-ping/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat: currentCoords.lat, lng: currentCoords.lng })
+            });
+        } catch (e) {}
+    }
+
+    async function uploadEvidence() {
+        const fileInput = document.getElementById('evidence-file');
+        if (!fileInput.files.length) { alert("Please select a file first."); return; }
+
+        const warnDiv = document.getElementById('geo-warning');
+        const succDiv = document.getElementById('geo-success');
+        warnDiv.classList.add('hidden'); succDiv.classList.add('hidden');
+
+        const performUpload = async (lat, lng) => {
+            const formData = new FormData();
+            formData.append('report', currentReportId);
+            formData.append('file', fileInput.files[0]);
+            if (lat && lng) {
+                formData.append('geo_lat', lat);
+                formData.append('geo_lng', lng);
+                succDiv.classList.remove('hidden');
+            }
+
+            if (!navigator.onLine || String(currentReportId).startsWith('offline-')) {
+                pendingOfflineFiles.push({ file: fileInput.files[0], lat: lat, lng: lng });
+                const list = document.getElementById('evidence-list');
+                list.innerHTML += `<div class="bg-slate-50 border border-slate-200 p-2 rounded text-xs flex justify-between items-center"><span class="truncate">${fileInput.files[0].name}</span><span class="text-orange-500 font-bold">Queued</span></div>`;
+                fileInput.value = '';
+                return;
+            }
+            try {
+                const res = await Auth.fetchWithAuth(`/api/reports/${currentReportId}/evidence/`, { method: 'POST', body: formData }, false);
+                if (res.ok) {
+                    const data = await res.json();
+                    let badge = '';
+                    if (data.geo_lat && data.geo_lng && data.consistency_checked) {
+                        if (data.location_flagged) badge = '<span class="bg-red-100 text-red-800 text-[10px] uppercase font-bold px-2 py-0.5 rounded ml-2">⚠️ Outside expected radius</span>';
+                        else badge = '<span class="bg-emerald-100 text-emerald-800 text-[10px] uppercase font-bold px-2 py-0.5 rounded ml-2">📍 Location Consistency Verified</span>';
+                    } else if (data.geo_lat && data.geo_lng) {
+                        badge = '<span class="bg-slate-100 text-slate-500 text-[10px] uppercase font-bold px-2 py-0.5 rounded ml-2">📍 GPS Captured (No Site Coordinates)</span>';
+                    }
+                    document.getElementById('evidence-list').innerHTML += `<li class="flex items-center">📁 ${data.file.split('/').pop()} ${badge}</li>`;
+                    fileInput.value = '';
+                } else { alert("Failed to upload evidence."); }
+            } catch(e) { alert("Network error during upload."); }
+        };
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => { performUpload(pos.coords.latitude, pos.coords.longitude); },
+                (err) => { warnDiv.classList.remove('hidden'); performUpload(null, null); },
+                { timeout: 5000 }
+            );
+        } else {
+            warnDiv.classList.remove('hidden');
+            performUpload(null, null);
+        }
+    }
+
+    async function finalizeReport() {
+        const fileInput = document.getElementById('evidence-file');
+        if (fileInput && fileInput.files.length > 0) {
+            alert("You have selected an evidence file but haven't uploaded it. Please click 'Upload File' first.");
+            return;
+        }
+
+        if (!confirm("⚠️ WARNING ⚠️\n\nFinalizing this report will permanently hash it onto the blockchain ledger. You cannot edit it after this step. Proceed?")) return;
+
+        let verifiedCount = 0;
+        document.querySelectorAll('.beneficiary-cb').forEach(cb => { if(cb.checked) verifiedCount++; });
+
+        let answers = [];
+        document.querySelectorAll('.purpose-cb').forEach(cb => {
+            answers.push({
+                category: cb.dataset.category,
+                question: cb.dataset.question,
+                is_compliant: cb.checked,
+                remarks: ""
+            });
+        });
+
+        let asset_verifications = [];
+        let violations = [];
+        document.querySelectorAll('.asset-row').forEach(row => {
+            const assetId = row.dataset.id;
+            const approved = parseInt(row.dataset.approved) || 0;
+            const foundInput = row.querySelector('.found-qty');
+            const found = foundInput.value === '' ? 0 : parseInt(foundInput.value);
+            const condition = row.querySelector('.asset-condition').value;
+
+            asset_verifications.push({
+                asset_id: assetId,
+                found_quantity: found,
+                condition: condition
+            });
+
+            if (found < approved) {
+                violations.push({
+                    severity: 'major',
+                    description: `Asset Deficit: Found ${found} instead of ${approved} for Asset ID ${assetId}`
+                });
+            }
+        });
+
+        const cctvStatus = document.getElementById('cctv-status').value;
+        if (cctvStatus === 'Offline' || cctvStatus === 'Not Installed') {
+            violations.push({
+                severity: 'minor',
+                description: `CCTV is ${cctvStatus}`
+            });
+        }
+
+        let findings = document.getElementById('input-findings').value;
+        const payload = {
+            findings: findings,
+            beneficiaries_verified_count: verifiedCount,
+            cctv_status: cctvStatus,
+            checklist_answers: answers,
+            asset_verifications: asset_verifications,
+            violations: violations
+        };
+
+        const fundStr = document.getElementById('input-funds').value;
+        if (fundStr) payload.fund_utilized_verified = fundStr;
+
+        if (!navigator.onLine || String(currentReportId).startsWith('offline-')) {
+            const outboxItem = {
+                id: 'sync-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+                inspectionId: currentInspection.id,
+                reportId: currentReportId,
+                payload: payload,
+                files: pendingOfflineFiles,
+                createdAt: new Date().toISOString(),
+                status: 'pending',
+                retryCount: 0
+            };
+            const tx = offlineDB.transaction('outbox', 'readwrite');
+            tx.objectStore('outbox').put(outboxItem);
+            
+            alert("Network offline! Report queued for sync.");
+            stopGpsTracking();
+            document.getElementById('active-inspection-panel').classList.add('opacity-0', 'pointer-events-none');
+            document.getElementById('no-inspection-selected').classList.remove('hidden');
+            currentInspection = null;
+            currentReportId = null;
+            updateNetworkUI();
+            
+            if ('serviceWorker' in navigator && navigator.serviceWorker.ready) {
+                navigator.serviceWorker.ready.then(sw => sw.sync.register('sync-reports').catch(err => console.log('Sync registration failed', err)));
+            }
+            return;
+        }
+
+        try {
+            const res = await Auth.fetchWithAuth(`/api/reports/${currentReportId}/finalize/`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                const data = await res.json();
+                alert(`SUCCESS! Report finalized.
+Blockchain Hash: ${data.block_hash.substring(0,16)}...`);
+                stopGpsTracking();
+                
+                document.getElementById('active-inspection-panel').classList.add('opacity-0', 'pointer-events-none');
+                document.getElementById('no-inspection-selected').classList.remove('hidden');
+                currentInspection = null;
+                loadData();
+            } else { 
+                const err = await res.json();
+                alert('Failed to finalize: ' + JSON.stringify(err)); 
+            }
+        } catch(e) { alert('Network error finalizing report.'); }
+    }
+
+    // Leave Logic
+    async function submitLeave(e) {
+        e.preventDefault();
+        try {
+            const res = await Auth.fetchWithAuth('/api/leaves/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    start_date: document.getElementById('leave-start').value, 
+                    end_date: document.getElementById('leave-end').value, 
+                    reason: document.getElementById('leave-reason').value 
+                })
+            });
+            if (res.ok) {
+                alert('Leave applied successfully.');
+                document.getElementById('leave-form').reset();
+                loadLeaves();
+            } else { alert('Failed to apply leave.'); }
+        } catch(e) { alert('Network error.'); }
+    }
+
+    async function loadLeaves() {
+        try {
+            const res = await Auth.fetchWithAuth('/api/leaves/');
+            const leaves = await res.json();
+            const list = document.getElementById('leave-list');
+            list.innerHTML = '';
+            if (leaves.length === 0) { list.innerHTML = '<li class="text-xs text-slate-400">No leave history.</li>'; return; }
+            leaves.forEach(l => {
+                let color = 'bg-yellow-100 text-yellow-800 border-yellow-200';
+                if (l.status === 'approved') color = 'bg-green-100 text-green-800 border-green-200';
+                if (l.status === 'rejected') color = 'bg-red-100 text-red-800 border-red-200';
+                list.innerHTML += `
+                    <li class="p-2.5 bg-white border rounded shadow-sm flex justify-between items-center gap-2">
+                        <div class="truncate">
+                            <div class="text-[11px] font-bold text-slate-700">${l.start_date} to ${l.end_date}</div>
+                            <div class="text-[10px] text-slate-500 truncate w-32">${l.reason}</div>
+                        </div>
+                        <span class="${color} border text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">${l.status}</span>
+                    </li>
+                `;
+            });
+        } catch(e) {}
+    }
+
+    // Swap Logic
+    async function openSwapModal(inspectionId) {
+        swapInspectionId = inspectionId;
+        const select = document.getElementById('swap-partner');
+        select.innerHTML = '<option>Loading available inspectors...</option>';
+        document.getElementById('swap-modal').classList.remove('hidden');
+
+        try {
+            const res = await Auth.fetchWithAuth('/api/users/available_inspectors/');
+            const available = await res.json();
+            select.innerHTML = '<option value="">-- Select Replacement Inspector --</option>';
+            available.forEach(insp => {
+                const phone = insp.phone ? `(${insp.phone})` : '';
+                select.innerHTML += `<option value="${insp.id}">${insp.first_name} ${insp.last_name} ${phone}</option>`;
+            });
+        } catch(e) { select.innerHTML = '<option>Failed to load.</option>'; }
+    }
+
+    function closeSwapModal() {
+        document.getElementById('swap-modal').classList.add('hidden');
+        swapInspectionId = null;
+        document.getElementById('swap-partner').value = '';
+        document.getElementById('swap-reason').value = '';
+    }
+
+    async function submitSwapRequest() {
+        const partner = document.getElementById('swap-partner').value;
+        const reason = document.getElementById('swap-reason').value;
+        if (!partner || !reason) { alert('Please select a partner and enter a reason.'); return; }
+
+        try {
+            const res = await Auth.fetchWithAuth('/api/duty-swaps/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ inspection: swapInspectionId, proposed_inspector: partner, reason: reason })
+            });
+            if (res.ok) {
+                alert('Swap request submitted to Official.');
+                closeSwapModal();
+            } else { alert('Failed to submit swap request.'); }
+        } catch (e) { alert('Failed to request swap.'); }
+    }
+
+</script>
+{% endblock %}

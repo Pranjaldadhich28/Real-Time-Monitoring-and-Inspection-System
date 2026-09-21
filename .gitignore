@@ -1,0 +1,39 @@
+﻿# Python / Django
+__pycache__/
+*.py[cod]
+*.class
+*.so
+
+# Environment Variables / Secrets
+.env
+.env.local
+secrets.json
+client_secrets.json
+
+# Local Database
+db.sqlite3
+db.sqlite3-journal
+
+# Media / Uploads
+media/
+media_root/
+uploads/
+
+# Virtual Environment
+venv/
+env/
+.venv/
+ENV/
+
+# IDE / OS specific files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Project specific
+cctv_streams/
+tmp/
+scratch/
